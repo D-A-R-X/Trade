@@ -1,0 +1,1430 @@
+//@version=6
+strategy("SENTINEL X",
+     overlay=true,
+     max_labels_count=100,
+     max_lines_count=100,
+     max_boxes_count=30,
+     pyramiding=0,
+     initial_capital=10000,
+     commission_type=strategy.commission.percent,
+     commission_value=0.0,
+     process_orders_on_close=false,
+     calc_on_order_fills=false,
+     dynamic_requests=false)
+
+// SENTINEL X is a deterministic research/backtesting engine.
+// It does not predict guaranteed outcomes and does not use future data.
+
+//------------------------------------------------------------------------------
+// Inputs
+//------------------------------------------------------------------------------
+
+grpTf = "01. Timeframes"
+primaryHint = input.string("Optimized for XAUUSD on 5 minute execution", "Execution note", group=grpTf, display=display.none)
+htfTf = input.timeframe("15", "Higher timeframe", group=grpTf, display=display.none)
+macroTf = input.timeframe("60", "Macro/context timeframe", group=grpTf, display=display.none)
+keyLevelTf = input.timeframe("60", "HTF key-level timeframe", group=grpTf, display=display.none)
+keyLevelSwingLen = input.int(3, "HTF key-level swing length", minval=1, maxval=10, group=grpTf, display=display.none)
+keyLevelNearAtrMult = input.float(0.80, "Near HTF key level, ATR", minval=0.10, maxval=5.00, step=0.05, group=grpTf, display=display.none)
+requireHtfKeyLevel = input.bool(true, "Require HTF key-level alignment", group=grpTf, display=display.none)
+useMacroTf = input.bool(true, "Use macro context timeframe", group=grpTf, display=display.none)
+tradeSession = input.session("0000-2359", "Trading session", group=grpTf, display=display.none)
+useSessionFilter = input.bool(false, "Only trade inside session", group=grpTf, display=display.none)
+showCoreTrendLines = input.bool(false, "Show EMA/VWAP lines", group=grpTf, display=display.none)
+showContextLevels = input.bool(false, "Show PDH/PDL/session levels", group=grpTf, display=display.none)
+
+grpRegime = "02. Regime"
+emaFastLen = input.int(20, "EMA fast length", minval=1, group=grpRegime, display=display.none)
+emaSlowLen = input.int(50, "EMA slow length", minval=2, group=grpRegime, display=display.none)
+adxLen = input.int(14, "ADX length", minval=2, group=grpRegime, display=display.none)
+adxSmoothing = input.int(14, "ADX smoothing", minval=1, group=grpRegime, display=display.none)
+adxTrendThreshold = input.float(18.0, "ADX trending threshold", minval=1.0, step=0.5, group=grpRegime, display=display.none)
+atrLen = input.int(14, "ATR length", minval=1, group=grpRegime, display=display.none)
+atrAvgLen = input.int(50, "ATR average length", minval=2, group=grpRegime, display=display.none)
+atrExtremeRatio = input.float(2.20, "Extreme volatility ATR ratio", minval=1.0, step=0.05, group=grpRegime, display=display.none)
+
+grpStruct = "03. Market Structure"
+swingLen = input.int(3, "Confirmed swing length", minval=1, maxval=25, group=grpStruct, display=display.none)
+minStructAtrMult = input.float(0.22, "Minimum structural distance, ATR", minval=0.0, step=0.05, group=grpStruct, display=display.none)
+requireBosDisplacement = input.bool(true, "Require displacement for BOS", group=grpStruct, display=display.none)
+displacementAtrMult = input.float(0.40, "Displacement body / ATR", minval=0.0, step=0.05, group=grpStruct, display=display.none)
+requireSweepForMss = input.bool(false, "Require liquidity sweep for MSS", group=grpStruct, display=display.none)
+showStructure = input.bool(false, "Show HH/HL/LH/LL labels", group=grpStruct, display=display.none)
+showBosChoch = input.bool(false, "Show BOS/CHoCH/MSS labels", group=grpStruct, display=display.none)
+
+grpBreak = "04. Breakout And Retest"
+rangeLen = input.int(36, "Range lookback bars", minval=10, group=grpBreak, display=display.none)
+rangeNearPct = input.float(0.22, "Near range edge percent", minval=0.01, maxval=0.50, step=0.01, group=grpBreak, display=display.none)
+retestBars = input.int(30, "Retest valid bars after break", minval=1, group=grpBreak, display=display.none)
+failedBreakBars = input.int(12, "Failed breakout lookback bars", minval=1, group=grpBreak, display=display.none)
+useVolumeBreakout = input.bool(false, "Require volume confirmation for valid breakout", group=grpBreak, display=display.none)
+breakoutVolMult = input.float(1.20, "Breakout volume multiplier", minval=0.1, step=0.05, group=grpBreak, display=display.none)
+
+grpLiq = "05. Liquidity"
+eqTolAtrMult = input.float(0.18, "Equal high/low tolerance, ATR", minval=0.0, step=0.01, group=grpLiq, display=display.none)
+sweepRejectAtrMult = input.float(0.12, "Sweep rejection size, ATR", minval=0.0, step=0.05, group=grpLiq, display=display.none)
+showLiquidity = input.bool(false, "Show liquidity labels and levels", group=grpLiq, display=display.none)
+showSweeps = input.bool(false, "Show liquidity sweep labels", group=grpLiq, display=display.none)
+
+grpSmt = "05B. SMT Trap"
+useSmtTrap = input.bool(true, "Use SMT trap confluence", group=grpSmt, display=display.none)
+smtSymbol = input.symbol("TVC:DXY", "SMT comparison symbol", group=grpSmt, display=display.none)
+smtInverseCorrelation = input.bool(true, "Comparison is inverse to XAUUSD", group=grpSmt, display=display.none)
+smtLookback = input.int(20, "SMT trap lookback bars", minval=3, maxval=100, group=grpSmt, display=display.none)
+showSmtMarkers = input.bool(false, "Show SMT trap markers", group=grpSmt, display=display.none)
+
+grpCrt = "05C. CRT Accumulation"
+useCrt = input.bool(true, "Use CRT accumulation confluence", group=grpCrt, display=display.none)
+crtTf = input.timeframe("15", "CRT accumulation timeframe", group=grpCrt, display=display.none)
+crtMaxRangeAtrMult = input.float(1.10, "Max accumulation range, ATR", minval=0.10, step=0.05, group=grpCrt, display=display.none)
+crtMaxBodyPct = input.float(0.55, "Max accumulation body percent", minval=0.05, maxval=1.00, step=0.05, group=grpCrt, display=display.none)
+crtActiveBars = input.int(96, "CRT range active bars", minval=5, maxval=500, group=grpCrt, display=display.none)
+crtConfirmBars = input.int(12, "CRT confirm after manipulation bars", minval=1, maxval=100, group=grpCrt, display=display.none)
+showCrtLevels = input.bool(false, "Show CRT CRH/CRL levels", group=grpCrt, display=display.none)
+showCrtMarkers = input.bool(false, "Show CRT manipulation markers", group=grpCrt, display=display.none)
+
+grpZones = "06. Zones And FVG"
+showZones = input.bool(false, "Show supply/demand and buy/sell zones", group=grpZones, display=display.none)
+zoneExtendBars = input.int(80, "Zone extension bars", minval=5, maxval=400, group=grpZones, display=display.none)
+zoneInvalidAtrMult = input.float(0.25, "Zone decisive invalidation, ATR", minval=0.0, step=0.05, group=grpZones, display=display.none)
+showFvg = input.bool(false, "Show fair value gaps", group=grpZones, display=display.none)
+fvgExtendBars = input.int(60, "FVG extension bars", minval=5, maxval=300, group=grpZones, display=display.none)
+useIfvgModel = input.bool(true, "Use BOS/MSS/iFVG liquidity model", group=grpZones, display=display.none)
+ifvgRetestBars = input.int(48, "iFVG retest valid bars", minval=3, maxval=200, group=grpZones, display=display.none)
+requireMssForIfvg = input.bool(true, "Require MSS before iFVG retest", group=grpZones, display=display.none)
+requireLiquidityTarget = input.bool(true, "Require liquidity target for iFVG model", group=grpZones, display=display.none)
+
+grpFib = "07. Fibonacci"
+showFib = input.bool(false, "Show active fib levels", group=grpFib, display=display.none)
+showFib273 = input.bool(true, "Show 0.273", group=grpFib, display=display.none)
+showFib382 = input.bool(true, "Show 0.382", group=grpFib, display=display.none)
+showFib500 = input.bool(true, "Show 0.500", group=grpFib, display=display.none)
+showFib618 = input.bool(true, "Show 0.618", group=grpFib, display=display.none)
+showFib786 = input.bool(true, "Show 0.786", group=grpFib, display=display.none)
+fibNearAtrMult = input.float(0.25, "Fib confluence tolerance, ATR", minval=0.0, step=0.05, group=grpFib, display=display.none)
+
+grpConfirm = "08. Confirmation"
+confirmMode = input.string("Balanced", "Entry confirmation mode", options=["Conservative", "Balanced", "Aggressive"], group=grpConfirm, display=display.none)
+confirmationFreshBars = input.int(5, "Fresh confirmation window, bars", minval=0, maxval=30, group=grpConfirm, display=display.none)
+vwapMode = input.string("Normal", "VWAP mode", options=["Strict", "Normal", "Soft"], group=grpConfirm, display=display.none)
+rsiLen = input.int(14, "RSI length", minval=2, group=grpConfirm, display=display.none)
+volAvgLen = input.int(30, "Volume average length", minval=1, group=grpConfirm, display=display.none)
+highVolMult = input.float(1.30, "High relative volume", minval=0.1, step=0.05, group=grpConfirm, display=display.none)
+lowVolMult = input.float(0.70, "Low relative volume", minval=0.1, step=0.05, group=grpConfirm, display=display.none)
+strictLowVolumeBlock = input.bool(false, "Strict mode: block low volume entries", group=grpConfirm, display=display.none)
+
+grpVp = "08B. Volume Profile Proxy"
+useVpConfluence = input.bool(true, "Use volume profile confluence", group=grpVp, display=display.none)
+vpLookback = input.int(120, "Rolling profile lookback bars", minval=20, maxval=500, group=grpVp, display=display.none)
+vpValueAreaMult = input.float(1.00, "Value area width multiplier", minval=0.10, step=0.05, group=grpVp, display=display.none)
+vpRetestAtrMult = input.float(0.20, "POC retest tolerance, ATR", minval=0.0, step=0.05, group=grpVp, display=display.none)
+showVpLevels = input.bool(false, "Show profile POC/value area", group=grpVp, display=display.none)
+
+grpScore = "09. Opportunity Score"
+tradeThreshold = input.int(60, "Trade threshold", minval=1, maxval=100, group=grpScore, display=display.none)
+showDashboard = input.bool(true, "Show score dashboard", group=grpScore, display=display.none)
+dashboardMode = input.string("Off", "Dashboard mode", options=["Off", "Compact", "Full"], group=grpScore, display=display.none)
+visualDensity = input.string("Clean", "Chart visual density", options=["Clean", "Normal", "Research"], group=grpScore, display=display.none)
+forceCleanChartUi = input.bool(true, "Force clean chart UI", group=grpScore, display=display.none)
+forceNoChartHud = input.bool(true, "Force no chart HUD/table", group=grpScore, display=display.none)
+showTradeLevels = input.bool(false, "Show entry/SL/TP plot lines", group=grpScore, display=display.none)
+showPreTradePlan = input.bool(true, "Show pre-entry plan in Data Window", group=grpScore, display=display.none)
+preTradeScoreBuffer = input.int(20, "Prepare within points of threshold", minval=0, maxval=40, group=grpScore, display=display.none)
+preTradeTriggerTicks = input.int(2, "Pre-entry trigger buffer, ticks", minval=0, maxval=100, group=grpScore, display=display.none)
+showPreTradePlanLines = input.bool(false, "Show pre-entry plan lines", group=grpScore, display=display.none)
+sendPreTradeAlerts = input.bool(true, "Send dynamic pre-entry alerts", group=grpScore, display=display.none)
+showDecisionLabels = input.bool(false, "Show decision labels on changes", group=grpScore, display=display.none)
+showCandidateMarkers = input.bool(false, "Show setup candidate markers", group=grpScore, display=display.none)
+showStateBackground = input.bool(false, "Show background state shading", group=grpScore, display=display.none)
+dashboardPositionInput = input.string("Bottom Right", "Dashboard position", options=["Top Right", "Bottom Right", "Bottom Left"], group=grpScore, display=display.none)
+
+grpRisk = "10. Risk"
+accountSize = input.float(10000.0, "Account size for sizing", minval=1.0, step=100.0, group=grpRisk, display=display.none)
+riskPct = input.float(1.00, "Risk per trade, percent", minval=0.01, maxval=10.0, step=0.05, group=grpRisk, display=display.none)
+pointValue = input.float(1.0, "Point value", minval=0.0000001, step=0.1, group=grpRisk, display=display.none)
+minPositionSize = input.float(1.0, "Minimum position size", minval=0.0, step=0.1, group=grpRisk, display=display.none)
+xauManualLotSize = input.float(0.01, "XAUUSD manual lot size to monitor", minval=0.0, step=0.01, group=grpRisk, display=display.none)
+xauPipSize = input.float(0.10, "XAUUSD pip size", minval=0.00001, step=0.01, group=grpRisk, display=display.none)
+xauContractOunces = input.float(100.0, "XAUUSD ounces per 1.00 lot", minval=1.0, step=1.0, group=grpRisk, display=display.none)
+showLotRiskAwareness = input.bool(true, "Show XAUUSD lot-risk awareness", group=grpRisk, display=display.none)
+blockOversizedManualLot = input.bool(false, "Block entries when monitored lot is too large", group=grpRisk, display=display.none)
+slMode = input.string("Hybrid", "Stop loss mode", options=["ATR", "Structural", "Hybrid"], group=grpRisk, display=display.none)
+slAtrMult = input.float(1.50, "ATR stop multiplier", minval=0.1, step=0.05, group=grpRisk, display=display.none)
+rrChoice = input.float(1.80, "Take profit RR", options=[1.0, 1.5, 1.8, 2.0, 2.5, 3.0], group=grpRisk, display=display.none)
+useLiquidityTargetForTp = input.bool(true, "Prefer liquidity target for TP", group=grpRisk, display=display.none)
+minLiquidityTargetR = input.float(1.20, "Minimum liquidity target R", minval=0.50, maxval=5.00, step=0.10, group=grpRisk, display=display.none)
+moveToBE = input.bool(false, "Move stop to break-even at +1R", group=grpRisk, display=display.none)
+beBufferTicks = input.int(0, "Break-even buffer, ticks", minval=0, group=grpRisk, display=display.none)
+useTrailingStop = input.bool(false, "Use ATR trailing stop", group=grpRisk, display=display.none)
+trailAtrMult = input.float(1.20, "Trailing ATR multiplier", minval=0.1, step=0.05, group=grpRisk, display=display.none)
+maxTradesPerDay = input.int(5, "Max trades per day", minval=1, group=grpRisk, display=display.none)
+dailyLossLimitPct = input.float(2.0, "Daily loss limit, percent", minval=0.1, step=0.1, group=grpRisk, display=display.none)
+maxConsecutiveLosses = input.int(3, "Max consecutive losses per day", minval=1, group=grpRisk, display=display.none)
+
+//------------------------------------------------------------------------------
+// Helpers
+//------------------------------------------------------------------------------
+
+f_clamp(float x, float lo, float hi) =>
+    math.max(lo, math.min(hi, x))
+
+f_grade(float score) =>
+    score >= 85 ? "A+" : score >= 75 ? "A" : score >= 65 ? "B" : score >= 55 ? "C" : "D"
+
+f_boolTxt(bool value) =>
+    value ? "YES" : "NO"
+
+f_stateColor(string state) =>
+    state == "CONFIRMED" ? color.new(color.lime, 75) :
+     state == "TESTING" ? color.new(color.yellow, 78) :
+     state == "INVALIDATED" ? color.new(color.gray, 88) :
+     state == "EXHAUSTED" ? color.new(color.gray, 86) :
+     color.new(color.teal, 82)
+
+f_near(float price, float level, float tolerance) =>
+    not na(level) and math.abs(price - level) <= tolerance
+
+f_crossCloseAbove(float level) =>
+    not na(level) and close > level and nz(close[1]) <= level
+
+f_crossCloseBelow(float level) =>
+    not na(level) and close < level and nz(close[1]) >= level
+
+f_wickRejectLow(float level, float atrValue, float mult) =>
+    not na(level) and low < level and close > level and (close - low) >= atrValue * mult
+
+f_wickRejectHigh(float level, float atrValue, float mult) =>
+    not na(level) and high > level and close < level and (high - close) >= atrValue * mult
+
+f_componentText(string name, float value, string maxText) =>
+    name + " " + str.tostring(math.round(value)) + "/" + maxText
+
+f_confirmedAdx() =>
+    [adxPlusLocal, adxMinusLocal, adxLocal] = ta.dmi(adxLen, adxSmoothing)
+    adxLocal[1]
+
+f_lastPivotHigh(int len) =>
+    pivotHigh = ta.pivothigh(high, len, len)
+    ta.valuewhen(not na(pivotHigh), pivotHigh, 0)
+
+f_lastPivotLow(int len) =>
+    pivotLow = ta.pivotlow(low, len, len)
+    ta.valuewhen(not na(pivotLow), pivotLow, 0)
+
+f_dashboardPosition(string selected) =>
+    selected == "Top Right" ? position.top_right : selected == "Bottom Left" ? position.bottom_left : position.bottom_right
+
+//------------------------------------------------------------------------------
+// Timeframe validation
+//------------------------------------------------------------------------------
+
+chartSec = timeframe.in_seconds(timeframe.period)
+htfSec = timeframe.in_seconds(htfTf)
+macroSec = timeframe.in_seconds(macroTf)
+keyLevelSec = timeframe.in_seconds(keyLevelTf)
+crtSec = timeframe.in_seconds(crtTf)
+isXauSymbol = str.contains(syminfo.tickerid, "XAU") or str.contains(syminfo.ticker, "XAU") or str.contains(syminfo.tickerid, "GOLD")
+cleanVisuals = visualDensity == "Clean"
+normalVisuals = visualDensity == "Normal"
+researchVisuals = visualDensity == "Research"
+cleanChartUi = forceCleanChartUi or cleanVisuals
+showDetailedChartLabels = not cleanChartUi and researchVisuals
+showEventChartLabels = not cleanChartUi and (normalVisuals or researchVisuals)
+showSetupChartMarkers = not cleanChartUi and showCandidateMarkers
+showSmtChartMarkers = not cleanChartUi and showSmtMarkers
+showCrtChartMarkers = not cleanChartUi and showCrtMarkers
+showChartBoxes = not cleanChartUi and showZones
+
+if barstate.isfirst
+    if na(chartSec) or na(htfSec) or htfSec <= chartSec
+        runtime.error("Selected higher timeframe must be greater than the chart timeframe.")
+    if useMacroTf and (na(macroSec) or macroSec <= chartSec)
+        runtime.error("Selected macro timeframe must be greater than the chart timeframe.")
+    if requireHtfKeyLevel and (na(keyLevelSec) or keyLevelSec <= chartSec)
+        runtime.error("Selected HTF key-level timeframe must be greater than the chart timeframe.")
+    if useCrt and (na(crtSec) or crtSec <= chartSec)
+        runtime.error("Selected CRT accumulation timeframe must be greater than the chart timeframe.")
+
+//------------------------------------------------------------------------------
+// Core measurements
+//------------------------------------------------------------------------------
+
+emaFast = ta.ema(close, emaFastLen)
+emaSlow = ta.ema(close, emaSlowLen)
+[diPlus, diMinus, adx] = ta.dmi(adxLen, adxSmoothing)
+atr = ta.atr(atrLen)
+atrAvg = ta.sma(atr, atrAvgLen)
+atrRatio = atrAvg > 0 ? atr / atrAvg : 1.0
+body = math.abs(close - open)
+candleRange = high - low
+bodyAtrRatio = atr > 0 ? body / atr : 0.0
+rangeAtrRatio = atr > 0 ? candleRange / atr : 0.0
+isBullClose = close > open
+isBearClose = close < open
+strongBullImpulse = isBullClose and bodyAtrRatio >= displacementAtrMult
+strongBearImpulse = isBearClose and bodyAtrRatio >= displacementAtrMult
+normalImpulse = bodyAtrRatio >= displacementAtrMult * 0.50 and bodyAtrRatio < displacementAtrMult
+
+volAvg = ta.sma(volume, volAvgLen)
+relVolume = volAvg > 0 ? volume / volAvg : 1.0
+volumeState = relVolume >= highVolMult ? "HIGH" : relVolume <= lowVolMult ? "LOW" : "NORMAL"
+
+rsi = ta.rsi(close, rsiLen)
+emaSlope = emaFast - emaFast[3]
+vwap = ta.vwap(hlc3)
+
+// Confirmed HTF values use the previous HTF candle and lookahead_off.
+[htfEmaFast, htfEmaSlow, htfClose, htfAdx, htfAtr, htfAtrAvg] = request.security(
+     syminfo.tickerid,
+     htfTf,
+     [ta.ema(close, emaFastLen)[1], ta.ema(close, emaSlowLen)[1], close[1], f_confirmedAdx(), ta.atr(atrLen)[1], ta.sma(ta.atr(atrLen), atrAvgLen)[1]],
+     lookahead=barmerge.lookahead_off)
+htfAtrRatio = htfAtrAvg > 0 ? htfAtr / htfAtrAvg : 1.0
+
+[macroEmaFast, macroEmaSlow, macroClose] = request.security(
+     syminfo.tickerid,
+     macroTf,
+     [ta.ema(close, emaFastLen)[1], ta.ema(close, emaSlowLen)[1], close[1]],
+     lookahead=barmerge.lookahead_off)
+
+[keyPivotHigh, keyPivotLow, keyPrevHigh, keyPrevLow] = request.security(
+     syminfo.tickerid,
+     keyLevelTf,
+     [f_lastPivotHigh(keyLevelSwingLen)[1], f_lastPivotLow(keyLevelSwingLen)[1], high[1], low[1]],
+     lookahead=barmerge.lookahead_off)
+
+[smtHigh, smtLow] = request.security(
+     smtSymbol,
+     timeframe.period,
+     [high, low],
+     lookahead=barmerge.lookahead_off)
+
+[crtSourceHigh, crtSourceLow, crtSourceOpen, crtSourceClose, crtSourceAtr, crtSourceTime] = request.security(
+     syminfo.tickerid,
+     crtTf,
+     [high[1], low[1], open[1], close[1], ta.atr(atrLen)[1], time[1]],
+     lookahead=barmerge.lookahead_off)
+
+htfBull = htfClose > htfEmaFast and htfEmaFast > htfEmaSlow
+htfBear = htfClose < htfEmaFast and htfEmaFast < htfEmaSlow
+macroBull = not useMacroTf or (macroClose > macroEmaFast and macroEmaFast > macroEmaSlow)
+macroBear = not useMacroTf or (macroClose < macroEmaFast and macroEmaFast < macroEmaSlow)
+
+//------------------------------------------------------------------------------
+// Previous day and previous session levels
+//------------------------------------------------------------------------------
+
+[prevDayHigh, prevDayLow] = request.security(
+     syminfo.tickerid,
+     "D",
+     [high[1], low[1]],
+     lookahead=barmerge.lookahead_off)
+
+inSession = not na(time(timeframe.period, tradeSession))
+sessionStart = inSession and not inSession[1]
+sessionEnd = not inSession and inSession[1]
+
+var float currentSessionHigh = na
+var float currentSessionLow = na
+var float prevSessionHigh = na
+var float prevSessionLow = na
+
+if sessionStart
+    currentSessionHigh := high
+    currentSessionLow := low
+else if inSession
+    currentSessionHigh := na(currentSessionHigh) ? high : math.max(currentSessionHigh, high)
+    currentSessionLow := na(currentSessionLow) ? low : math.min(currentSessionLow, low)
+
+if sessionEnd
+    prevSessionHigh := currentSessionHigh
+    prevSessionLow := currentSessionLow
+
+plot(showContextLevels and not cleanChartUi ? prevDayHigh : na, "Previous Day High", color=color.new(color.orange, 15), style=plot.style_linebr, linewidth=1, display=display.pane)
+plot(showContextLevels and not cleanChartUi ? prevDayLow : na, "Previous Day Low", color=color.new(color.orange, 15), style=plot.style_linebr, linewidth=1, display=display.pane)
+plot(showContextLevels and not cleanChartUi ? prevSessionHigh : na, "Previous Session High", color=color.new(color.blue, 25), style=plot.style_linebr, linewidth=1, display=display.pane)
+plot(showContextLevels and not cleanChartUi ? prevSessionLow : na, "Previous Session Low", color=color.new(color.blue, 25), style=plot.style_linebr, linewidth=1, display=display.pane)
+
+//------------------------------------------------------------------------------
+// Confirmed market structure
+//------------------------------------------------------------------------------
+
+ph = ta.pivothigh(high, swingLen, swingLen)
+pl = ta.pivotlow(low, swingLen, swingLen)
+
+var float lastSwingHigh = na
+var float prevSwingHigh = na
+var int lastSwingHighBar = na
+var string lastHighClass = "NA"
+
+var float lastSwingLow = na
+var float prevSwingLow = na
+var int lastSwingLowBar = na
+var string lastLowClass = "NA"
+
+var int structureDir = 0
+var float eqHighLevel = na
+var int eqHighBar = na
+var float eqLowLevel = na
+var int eqLowBar = na
+
+eqTolerance = atr * eqTolAtrMult
+atrAtPivot = atr[swingLen]
+minStructDistance = atrAtPivot * minStructAtrMult
+
+newStructHigh = false
+newStructLow = false
+
+if not na(ph)
+    pivotBar = bar_index - swingLen
+    if not na(lastSwingHigh) and math.abs(ph - lastSwingHigh) <= eqTolerance
+        eqHighLevel := (ph + lastSwingHigh) / 2.0
+        eqHighBar := pivotBar
+        if showLiquidity and showDetailedChartLabels
+            label.new(pivotBar, ph, "EQH", xloc=xloc.bar_index, style=label.style_label_down, color=color.new(color.fuchsia, 0), textcolor=color.white, size=size.tiny)
+    meaningfulHigh = na(lastSwingHigh) or math.abs(ph - lastSwingHigh) >= minStructDistance
+    if meaningfulHigh
+        prevSwingHigh := lastSwingHigh
+        highClass = na(lastSwingHigh) ? "HH" : ph > lastSwingHigh ? "HH" : "LH"
+        lastSwingHigh := ph
+        lastSwingHighBar := pivotBar
+        lastHighClass := highClass
+        newStructHigh := true
+        if showStructure and showDetailedChartLabels
+            label.new(pivotBar, ph, highClass, xloc=xloc.bar_index, style=label.style_label_down, color=highClass == "HH" ? color.new(color.green, 0) : color.new(color.red, 0), textcolor=color.white, size=size.small)
+
+if not na(pl)
+    pivotBar = bar_index - swingLen
+    if not na(lastSwingLow) and math.abs(pl - lastSwingLow) <= eqTolerance
+        eqLowLevel := (pl + lastSwingLow) / 2.0
+        eqLowBar := pivotBar
+        if showLiquidity and showDetailedChartLabels
+            label.new(pivotBar, pl, "EQL", xloc=xloc.bar_index, style=label.style_label_up, color=color.new(color.fuchsia, 0), textcolor=color.white, size=size.tiny)
+    meaningfulLow = na(lastSwingLow) or math.abs(pl - lastSwingLow) >= minStructDistance
+    if meaningfulLow
+        prevSwingLow := lastSwingLow
+        lowClass = na(lastSwingLow) ? "LL" : pl > lastSwingLow ? "HL" : "LL"
+        lastSwingLow := pl
+        lastSwingLowBar := pivotBar
+        lastLowClass := lowClass
+        newStructLow := true
+        if showStructure and showDetailedChartLabels
+            label.new(pivotBar, pl, lowClass, xloc=xloc.bar_index, style=label.style_label_up, color=lowClass == "HL" ? color.new(color.green, 0) : color.new(color.red, 0), textcolor=color.white, size=size.small)
+
+if lastHighClass == "HH" and lastLowClass == "HL"
+    structureDir := 1
+else if lastHighClass == "LH" and lastLowClass == "LL"
+    structureDir := -1
+else
+    structureDir := structureDir
+
+//------------------------------------------------------------------------------
+// Regime
+//------------------------------------------------------------------------------
+
+localBullTrend = emaFast > emaSlow and diPlus > diMinus and adx >= adxTrendThreshold and structureDir == 1
+localBearTrend = emaFast < emaSlow and diMinus > diPlus and adx >= adxTrendThreshold and structureDir == -1
+isExtremeVol = atrRatio >= atrExtremeRatio
+isRanging = adx < adxTrendThreshold and not isExtremeVol
+regime = isExtremeVol ? "VOLATILE" : localBullTrend ? "TRENDING_BULL" : localBearTrend ? "TRENDING_BEAR" : isRanging ? "RANGING" : "NEUTRAL"
+
+//------------------------------------------------------------------------------
+// BOS, CHoCH, MSS
+//------------------------------------------------------------------------------
+
+displacementOk = not requireBosDisplacement or bodyAtrRatio >= displacementAtrMult
+var int lastBullBosSwingBar = na
+var int lastBearBosSwingBar = na
+var float lastBullBosLevel = na
+var float lastBearBosLevel = na
+var int lastBullBosBar = na
+var int lastBearBosBar = na
+
+rawBullBos = not na(lastSwingHigh) and close > lastSwingHigh and close[1] <= lastSwingHigh and lastSwingHighBar != lastBullBosSwingBar
+rawBearBos = not na(lastSwingLow) and close < lastSwingLow and close[1] >= lastSwingLow and lastSwingLowBar != lastBearBosSwingBar
+bullBos = rawBullBos and displacementOk
+bearBos = rawBearBos and displacementOk
+
+bullChoch = bullBos and (structureDir == -1 or lastHighClass == "LH")
+bearChoch = bearBos and (structureDir == 1 or lastLowClass == "HL")
+
+// Liquidity sweep variables are assigned later. MSS is finalized after sweep calculation.
+var bool bullSweep = false
+var bool bearSweep = false
+
+if bullBos
+    lastBullBosSwingBar := lastSwingHighBar
+    lastBullBosLevel := lastSwingHigh
+    lastBullBosBar := bar_index
+    if showBosChoch and showEventChartLabels
+        label.new(bar_index, high, bullChoch ? "CHoCH UP" : "BOS UP", xloc=xloc.bar_index, style=label.style_label_down, color=bullChoch ? color.new(color.aqua, 0) : color.new(color.green, 0), textcolor=color.black, size=size.small)
+
+if bearBos
+    lastBearBosSwingBar := lastSwingLowBar
+    lastBearBosLevel := lastSwingLow
+    lastBearBosBar := bar_index
+    if showBosChoch and showEventChartLabels
+        label.new(bar_index, low, bearChoch ? "CHoCH DOWN" : "BOS DOWN", xloc=xloc.bar_index, style=label.style_label_up, color=bearChoch ? color.new(color.aqua, 0) : color.new(color.red, 0), textcolor=color.black, size=size.small)
+
+//------------------------------------------------------------------------------
+// Breakouts, failed breakouts, pullbacks, retests
+//------------------------------------------------------------------------------
+
+rangeHigh = ta.highest(high[1], rangeLen)
+rangeLow = ta.lowest(low[1], rangeLen)
+rangeSize = rangeHigh - rangeLow
+rangeMid = (rangeHigh + rangeLow) / 2.0
+rangePosition = rangeSize > 0 ? (close - rangeLow) / rangeSize : 0.5
+midRangeNoTrade = regime == "RANGING" and rangePosition >= 0.30 and rangePosition <= 0.70
+
+volBreakoutOk = not useVolumeBreakout or relVolume >= breakoutVolMult
+
+float breakHighLevel = na
+breakHighName = "NONE"
+if f_crossCloseAbove(lastSwingHigh)
+    breakHighLevel := lastSwingHigh
+    breakHighName := "SWING HIGH"
+else if f_crossCloseAbove(rangeHigh)
+    breakHighLevel := rangeHigh
+    breakHighName := "RANGE HIGH"
+else if f_crossCloseAbove(prevDayHigh)
+    breakHighLevel := prevDayHigh
+    breakHighName := "PDH"
+else if f_crossCloseAbove(prevSessionHigh)
+    breakHighLevel := prevSessionHigh
+    breakHighName := "PSH"
+
+float breakLowLevel = na
+breakLowName = "NONE"
+if f_crossCloseBelow(lastSwingLow)
+    breakLowLevel := lastSwingLow
+    breakLowName := "SWING LOW"
+else if f_crossCloseBelow(rangeLow)
+    breakLowLevel := rangeLow
+    breakLowName := "RANGE LOW"
+else if f_crossCloseBelow(prevDayLow)
+    breakLowLevel := prevDayLow
+    breakLowName := "PDL"
+else if f_crossCloseBelow(prevSessionLow)
+    breakLowLevel := prevSessionLow
+    breakLowName := "PSL"
+
+validBullBreakout = not na(breakHighLevel) and displacementOk and volBreakoutOk
+validBearBreakout = not na(breakLowLevel) and displacementOk and volBreakoutOk
+potentialBullBreakout = na(breakHighLevel) and ((not na(lastSwingHigh) and high > lastSwingHigh and close <= lastSwingHigh) or (not na(rangeHigh) and high > rangeHigh and close <= rangeHigh) or (not na(prevDayHigh) and high > prevDayHigh and close <= prevDayHigh) or (not na(prevSessionHigh) and high > prevSessionHigh and close <= prevSessionHigh))
+potentialBearBreakout = na(breakLowLevel) and ((not na(lastSwingLow) and low < lastSwingLow and close >= lastSwingLow) or (not na(rangeLow) and low < rangeLow and close >= rangeLow) or (not na(prevDayLow) and low < prevDayLow and close >= prevDayLow) or (not na(prevSessionLow) and low < prevSessionLow and close >= prevSessionLow))
+
+var float lastValidBullBreakLevel = na
+var int lastValidBullBreakBar = na
+var float lastValidBearBreakLevel = na
+var int lastValidBearBreakBar = na
+
+if validBullBreakout
+    lastValidBullBreakLevel := breakHighLevel
+    lastValidBullBreakBar := bar_index
+    if showEventChartLabels
+        label.new(bar_index, high, "VALID BREAKOUT\n" + breakHighName, xloc=xloc.bar_index, style=label.style_label_down, color=color.new(color.green, 10), textcolor=color.white, size=size.tiny)
+
+if validBearBreakout
+    lastValidBearBreakLevel := breakLowLevel
+    lastValidBearBreakBar := bar_index
+    if showEventChartLabels
+        label.new(bar_index, low, "VALID BREAKOUT\n" + breakLowName, xloc=xloc.bar_index, style=label.style_label_up, color=color.new(color.red, 10), textcolor=color.white, size=size.tiny)
+
+failedBullBreakout = potentialBullBreakout or (not na(lastValidBullBreakLevel) and bar_index - lastValidBullBreakBar <= failedBreakBars and close < lastValidBullBreakLevel)
+failedBearBreakout = potentialBearBreakout or (not na(lastValidBearBreakLevel) and bar_index - lastValidBearBreakBar <= failedBreakBars and close > lastValidBearBreakLevel)
+
+if failedBullBreakout and showDetailedChartLabels
+    label.new(bar_index, high, "FAILED BULL BREAKOUT", xloc=xloc.bar_index, style=label.style_label_down, color=color.new(color.maroon, 0), textcolor=color.white, size=size.tiny)
+if failedBearBreakout and showDetailedChartLabels
+    label.new(bar_index, low, "FAILED BEAR BREAKOUT", xloc=xloc.bar_index, style=label.style_label_up, color=color.new(color.maroon, 0), textcolor=color.white, size=size.tiny)
+
+bullPullback = not na(lastBullBosBar) and bar_index > lastBullBosBar and bar_index - lastBullBosBar <= retestBars and close < close[1] and close > nz(lastSwingLow, close - atr)
+bearPullback = not na(lastBearBosBar) and bar_index > lastBearBosBar and bar_index - lastBearBosBar <= retestBars and close > close[1] and close < nz(lastSwingHigh, close + atr)
+bullRetest = not na(lastBullBosLevel) and bar_index > lastBullBosBar and bar_index - lastBullBosBar <= retestBars and low <= lastBullBosLevel and close >= lastBullBosLevel
+bearRetest = not na(lastBearBosLevel) and bar_index > lastBearBosBar and bar_index - lastBearBosBar <= retestBars and high >= lastBearBosLevel and close <= lastBearBosLevel
+
+if bullRetest and showEventChartLabels
+    label.new(bar_index, low, "BULLISH RETEST", xloc=xloc.bar_index, style=label.style_label_up, color=color.new(color.green, 15), textcolor=color.white, size=size.tiny)
+if bearRetest and showEventChartLabels
+    label.new(bar_index, high, "BEARISH RETEST", xloc=xloc.bar_index, style=label.style_label_down, color=color.new(color.red, 15), textcolor=color.white, size=size.tiny)
+
+//------------------------------------------------------------------------------
+// Liquidity and sweeps
+//------------------------------------------------------------------------------
+
+float sweptLowLevel = na
+sweptLowName = "NONE"
+if f_wickRejectLow(eqLowLevel, atr, sweepRejectAtrMult)
+    sweptLowLevel := eqLowLevel
+    sweptLowName := "EQL"
+else if f_wickRejectLow(lastSwingLow, atr, sweepRejectAtrMult)
+    sweptLowLevel := lastSwingLow
+    sweptLowName := "SWING LOW"
+else if f_wickRejectLow(prevDayLow, atr, sweepRejectAtrMult)
+    sweptLowLevel := prevDayLow
+    sweptLowName := "PDL"
+else if f_wickRejectLow(prevSessionLow, atr, sweepRejectAtrMult)
+    sweptLowLevel := prevSessionLow
+    sweptLowName := "PSL"
+
+float sweptHighLevel = na
+sweptHighName = "NONE"
+if f_wickRejectHigh(eqHighLevel, atr, sweepRejectAtrMult)
+    sweptHighLevel := eqHighLevel
+    sweptHighName := "EQH"
+else if f_wickRejectHigh(lastSwingHigh, atr, sweepRejectAtrMult)
+    sweptHighLevel := lastSwingHigh
+    sweptHighName := "SWING HIGH"
+else if f_wickRejectHigh(prevDayHigh, atr, sweepRejectAtrMult)
+    sweptHighLevel := prevDayHigh
+    sweptHighName := "PDH"
+else if f_wickRejectHigh(prevSessionHigh, atr, sweepRejectAtrMult)
+    sweptHighLevel := prevSessionHigh
+    sweptHighName := "PSH"
+
+bullSweep := not na(sweptLowLevel)
+bearSweep := not na(sweptHighLevel)
+smtRecentHigh = ta.highest(smtHigh[1], smtLookback)
+smtRecentLow = ta.lowest(smtLow[1], smtLookback)
+smtDataReady = not na(smtHigh) and not na(smtLow) and not na(smtRecentHigh) and not na(smtRecentLow)
+smtExpectedHighBreak = smtHigh > smtRecentHigh
+smtExpectedLowBreak = smtLow < smtRecentLow
+bullSmtTrap = useSmtTrap and smtDataReady and bullSweep and (smtInverseCorrelation ? not smtExpectedHighBreak : not smtExpectedLowBreak)
+bearSmtTrap = useSmtTrap and smtDataReady and bearSweep and (smtInverseCorrelation ? not smtExpectedLowBreak : not smtExpectedHighBreak)
+
+crtSourceRange = crtSourceHigh - crtSourceLow
+crtSourceBodyPct = crtSourceRange > 0 ? math.abs(crtSourceClose - crtSourceOpen) / crtSourceRange : 1.0
+crtNewConfirmedCandle = ta.change(crtSourceTime) != 0
+crtAccumCandidate = useCrt and crtSourceRange > syminfo.mintick and crtSourceRange <= crtSourceAtr * crtMaxRangeAtrMult and crtSourceBodyPct <= crtMaxBodyPct
+
+var float crtHigh = na
+var float crtLow = na
+var int crtCreatedBar = na
+var string crtState = "NONE"
+var float crtLongManipHigh = na
+var float crtLongManipLow = na
+var int crtLongManipBar = na
+var float crtShortManipHigh = na
+var float crtShortManipLow = na
+var int crtShortManipBar = na
+
+if crtNewConfirmedCandle and crtAccumCandidate
+    crtHigh := crtSourceHigh
+    crtLow := crtSourceLow
+    crtCreatedBar := bar_index
+    crtState := "ACTIVE"
+    crtLongManipHigh := na
+    crtLongManipLow := na
+    crtLongManipBar := na
+    crtShortManipHigh := na
+    crtShortManipLow := na
+    crtShortManipBar := na
+
+crtActive = useCrt and not na(crtHigh) and not na(crtLow) and not na(crtCreatedBar) and bar_index - crtCreatedBar <= crtActiveBars
+crtLongManipulation = crtActive and low < crtLow and close > crtLow
+crtShortManipulation = crtActive and high > crtHigh and close < crtHigh
+
+if crtLongManipulation
+    crtLongManipHigh := high
+    crtLongManipLow := low
+    crtLongManipBar := bar_index
+    crtState := "LONG MANIP"
+
+if crtShortManipulation
+    crtShortManipHigh := high
+    crtShortManipLow := low
+    crtShortManipBar := bar_index
+    crtState := "SHORT MANIP"
+
+crtBullConfirmRaw = crtActive and not na(crtLongManipBar) and bar_index > crtLongManipBar and bar_index - crtLongManipBar <= crtConfirmBars and close > crtLongManipHigh
+crtBearConfirmRaw = crtActive and not na(crtShortManipBar) and bar_index > crtShortManipBar and bar_index - crtShortManipBar <= crtConfirmBars and close < crtShortManipLow
+crtBullConfirm = crtBullConfirmRaw and not crtBullConfirmRaw[1]
+crtBearConfirm = crtBearConfirmRaw and not crtBearConfirmRaw[1]
+barsSinceCrtBullConfirm = ta.barssince(crtBullConfirm)
+barsSinceCrtBearConfirm = ta.barssince(crtBearConfirm)
+freshCrtBullConfirm = not na(barsSinceCrtBullConfirm) and barsSinceCrtBullConfirm <= confirmationFreshBars
+freshCrtBearConfirm = not na(barsSinceCrtBearConfirm) and barsSinceCrtBearConfirm <= confirmationFreshBars
+
+if crtBullConfirm
+    crtState := "BULL CONFIRM"
+if crtBearConfirm
+    crtState := "BEAR CONFIRM"
+
+if useCrt and not crtActive and not na(crtCreatedBar)
+    crtState := "EXPIRED"
+
+if showSweeps and showEventChartLabels and bullSweep
+    label.new(bar_index, low, "BULL LIQUIDITY SWEEP\n" + sweptLowName, xloc=xloc.bar_index, style=label.style_label_up, color=color.new(color.lime, 0), textcolor=color.black, size=size.small)
+if showSweeps and showEventChartLabels and bearSweep
+    label.new(bar_index, high, "BEAR LIQUIDITY SWEEP\n" + sweptHighName, xloc=xloc.bar_index, style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.small)
+
+bullMss = bullChoch and bodyAtrRatio >= displacementAtrMult and (not requireSweepForMss or bullSweep)
+bearMss = bearChoch and bodyAtrRatio >= displacementAtrMult and (not requireSweepForMss or bearSweep)
+
+if showBosChoch and showEventChartLabels and bullMss
+    label.new(bar_index, low, "BULLISH MSS", xloc=xloc.bar_index, style=label.style_label_up, color=color.new(color.lime, 0), textcolor=color.black, size=size.normal)
+if showBosChoch and showEventChartLabels and bearMss
+    label.new(bar_index, high, "BEARISH MSS", xloc=xloc.bar_index, style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.normal)
+
+plot(showLiquidity and showEventChartLabels ? eqHighLevel : na, "Equal High Liquidity", color=color.new(color.fuchsia, 55), style=plot.style_linebr, display=display.pane)
+plot(showLiquidity and showEventChartLabels ? eqLowLevel : na, "Equal Low Liquidity", color=color.new(color.fuchsia, 55), style=plot.style_linebr, display=display.pane)
+
+//------------------------------------------------------------------------------
+// Supply, demand, buy/sell zones, and FVG
+//------------------------------------------------------------------------------
+
+var box demandBox = na
+var float demandHigh = na
+var float demandLow = na
+var string demandState = "NONE"
+var int demandCreatedBar = na
+var float demandQuality = 0.0
+
+var box supplyBox = na
+var float supplyHigh = na
+var float supplyLow = na
+var string supplyState = "NONE"
+var int supplyCreatedBar = na
+var float supplyQuality = 0.0
+
+nearStructuralSupport = f_near(low, lastSwingLow, atr * 0.50) or f_near(low, prevDayLow, atr * 0.50) or f_near(low, prevSessionLow, atr * 0.50)
+nearStructuralResistance = f_near(high, lastSwingHigh, atr * 0.50) or f_near(high, prevDayHigh, atr * 0.50) or f_near(high, prevSessionHigh, atr * 0.50)
+
+createDemand = strongBullImpulse and (bullBos or bullChoch or bullSweep or bullSmtTrap or freshCrtBullConfirm or nearStructuralSupport)
+createSupply = strongBearImpulse and (bearBos or bearChoch or bearSweep or bearSmtTrap or freshCrtBearConfirm or nearStructuralResistance)
+
+if createDemand
+    demandLow := low
+    demandHigh := math.min(open, close)
+    demandState := "ACTIVE"
+    demandCreatedBar := bar_index
+    demandQuality := (freshCrtBullConfirm ? 3 : bullSmtTrap ? 3 : bullSweep ? 2 : 0) + (bullBos or bullChoch ? 3 : 0) + (nearStructuralSupport ? 2 : 0) + (relVolume >= highVolMult ? 2 : 1)
+    if showChartBoxes
+        if not na(demandBox)
+            box.delete(demandBox)
+        demandBox := box.new(bar_index, demandHigh, bar_index + zoneExtendBars, demandLow, xloc=xloc.bar_index, border_color=color.new(color.green, 0), bgcolor=color.new(color.green, 84))
+        if showDetailedChartLabels
+            label.new(bar_index, demandLow, "DEMAND\nQ " + str.tostring(math.round(demandQuality)), xloc=xloc.bar_index, style=label.style_label_up, color=color.new(color.green, 0), textcolor=color.white, size=size.tiny)
+
+if createSupply
+    supplyHigh := high
+    supplyLow := math.max(open, close)
+    supplyState := "ACTIVE"
+    supplyCreatedBar := bar_index
+    supplyQuality := (freshCrtBearConfirm ? 3 : bearSmtTrap ? 3 : bearSweep ? 2 : 0) + (bearBos or bearChoch ? 3 : 0) + (nearStructuralResistance ? 2 : 0) + (relVolume >= highVolMult ? 2 : 1)
+    if showChartBoxes
+        if not na(supplyBox)
+            box.delete(supplyBox)
+        supplyBox := box.new(bar_index, supplyHigh, bar_index + zoneExtendBars, supplyLow, xloc=xloc.bar_index, border_color=color.new(color.red, 0), bgcolor=color.new(color.red, 84))
+        if showDetailedChartLabels
+            label.new(bar_index, supplyHigh, "SUPPLY\nQ " + str.tostring(math.round(supplyQuality)), xloc=xloc.bar_index, style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.tiny)
+
+demandTouched = not na(demandLow) and low <= demandHigh and high >= demandLow
+supplyTouched = not na(supplyHigh) and high >= supplyLow and low <= supplyHigh
+
+if demandState != "NONE"
+    if close < demandLow - atr * zoneInvalidAtrMult
+        demandState := "INVALIDATED"
+    else if demandTouched and close > demandHigh
+        demandState := "CONFIRMED"
+    else if demandTouched
+        demandState := "TESTING"
+
+if supplyState != "NONE"
+    if close > supplyHigh + atr * zoneInvalidAtrMult
+        supplyState := "INVALIDATED"
+    else if supplyTouched and close < supplyLow
+        supplyState := "CONFIRMED"
+    else if supplyTouched
+        supplyState := "TESTING"
+
+if showChartBoxes and not na(demandBox)
+    box.set_right(demandBox, bar_index + zoneExtendBars)
+    box.set_bgcolor(demandBox, demandState == "INVALIDATED" ? color.new(color.gray, 90) : f_stateColor(demandState))
+if showChartBoxes and not na(supplyBox)
+    box.set_right(supplyBox, bar_index + zoneExtendBars)
+    box.set_bgcolor(supplyBox, supplyState == "INVALIDATED" ? color.new(color.gray, 90) : supplyState == "CONFIRMED" ? color.new(color.red, 77) : color.new(color.red, 84))
+
+var box bullFvgBox = na
+var float bullFvgTop = na
+var float bullFvgBottom = na
+var string bullFvgState = "NONE"
+
+var box bearFvgBox = na
+var float bearFvgTop = na
+var float bearFvgBottom = na
+var string bearFvgState = "NONE"
+
+var float ifvgTop = na
+var float ifvgBottom = na
+var int ifvgDir = 0
+var int ifvgCreatedBar = na
+var string ifvgState = "NONE"
+
+bullFvg = low > high[2] and barstate.isconfirmed
+bearFvg = high < low[2] and barstate.isconfirmed
+
+if bullFvg
+    bullFvgTop := low
+    bullFvgBottom := high[2]
+    bullFvgState := "ACTIVE"
+    if showFvg and not cleanVisuals
+        if not na(bullFvgBox)
+            box.delete(bullFvgBox)
+        bullFvgBox := box.new(bar_index - 2, bullFvgTop, bar_index + fvgExtendBars, bullFvgBottom, xloc=xloc.bar_index, border_color=color.new(color.green, 45), bgcolor=color.new(color.green, 90))
+
+if bearFvg
+    bearFvgTop := low[2]
+    bearFvgBottom := high
+    bearFvgState := "ACTIVE"
+    if showFvg and not cleanVisuals
+        if not na(bearFvgBox)
+            box.delete(bearFvgBox)
+        bearFvgBox := box.new(bar_index - 2, bearFvgTop, bar_index + fvgExtendBars, bearFvgBottom, xloc=xloc.bar_index, border_color=color.new(color.red, 45), bgcolor=color.new(color.red, 90))
+
+bullFvgInvalidatesNow = bullFvgState == "ACTIVE" and low <= bullFvgTop and close < bullFvgBottom
+bearFvgInvalidatesNow = bearFvgState == "ACTIVE" and high >= bearFvgBottom and close > bearFvgTop
+
+if useIfvgModel and bullFvgInvalidatesNow
+    ifvgTop := bullFvgTop
+    ifvgBottom := bullFvgBottom
+    ifvgDir := -1
+    ifvgCreatedBar := bar_index
+    ifvgState := "BEARISH ACTIVE"
+
+if useIfvgModel and bearFvgInvalidatesNow
+    ifvgTop := bearFvgTop
+    ifvgBottom := bearFvgBottom
+    ifvgDir := 1
+    ifvgCreatedBar := bar_index
+    ifvgState := "BULLISH ACTIVE"
+
+if bullFvgState == "ACTIVE" and low <= bullFvgTop
+    bullFvgState := close < bullFvgBottom ? "INVALIDATED" : "MITIGATED"
+if bearFvgState == "ACTIVE" and high >= bearFvgBottom
+    bearFvgState := close > bearFvgTop ? "INVALIDATED" : "MITIGATED"
+
+if showFvg and not cleanVisuals and not na(bullFvgBox)
+    box.set_right(bullFvgBox, bar_index + fvgExtendBars)
+    box.set_bgcolor(bullFvgBox, bullFvgState == "ACTIVE" ? color.new(color.green, 90) : bullFvgState == "MITIGATED" ? color.new(color.yellow, 90) : color.new(color.gray, 92))
+if showFvg and not cleanVisuals and not na(bearFvgBox)
+    box.set_right(bearFvgBox, bar_index + fvgExtendBars)
+    box.set_bgcolor(bearFvgBox, bearFvgState == "ACTIVE" ? color.new(color.red, 90) : bearFvgState == "MITIGATED" ? color.new(color.yellow, 90) : color.new(color.gray, 92))
+
+barsSinceBullMss = ta.barssince(bullMss)
+barsSinceBearMss = ta.barssince(bearMss)
+recentBullMss = not na(barsSinceBullMss) and barsSinceBullMss <= ifvgRetestBars
+recentBearMss = not na(barsSinceBearMss) and barsSinceBearMss <= ifvgRetestBars
+ifvgActive = useIfvgModel and ifvgDir != 0 and not na(ifvgTop) and not na(ifvgBottom) and not na(ifvgCreatedBar) and bar_index - ifvgCreatedBar <= ifvgRetestBars
+ifvgTouched = ifvgActive and low <= ifvgTop and high >= ifvgBottom
+ifvgLongRetestRaw = ifvgActive and ifvgDir == 1 and ifvgTouched and close > ifvgBottom and isBullClose
+ifvgShortRetestRaw = ifvgActive and ifvgDir == -1 and ifvgTouched and close < ifvgTop and isBearClose
+ifvgLongRetest = ifvgLongRetestRaw and (not requireMssForIfvg or recentBullMss)
+ifvgShortRetest = ifvgShortRetestRaw and (not requireMssForIfvg or recentBearMss)
+
+if ifvgLongRetest
+    ifvgState := "BULLISH RETEST"
+if ifvgShortRetest
+    ifvgState := "BEARISH RETEST"
+if useIfvgModel and ifvgActive and close > ifvgTop and ifvgDir == -1
+    ifvgState := "BEARISH FAILED"
+if useIfvgModel and ifvgActive and close < ifvgBottom and ifvgDir == 1
+    ifvgState := "BULLISH FAILED"
+if useIfvgModel and not ifvgActive and not na(ifvgCreatedBar)
+    ifvgState := "EXPIRED"
+
+//------------------------------------------------------------------------------
+// Fibonacci, premium, discount, equilibrium
+//------------------------------------------------------------------------------
+
+var float impulseHigh = na
+var float impulseLow = na
+var int impulseDir = 0
+
+if bullBos and not na(lastSwingLow)
+    impulseHigh := high
+    impulseLow := lastSwingLow
+    impulseDir := 1
+if bearBos and not na(lastSwingHigh)
+    impulseHigh := lastSwingHigh
+    impulseLow := low
+    impulseDir := -1
+
+impulseRange = impulseHigh - impulseLow
+fib273 = impulseDir == 1 ? impulseHigh - impulseRange * 0.273 : impulseDir == -1 ? impulseLow + impulseRange * 0.273 : na
+fib382 = impulseDir == 1 ? impulseHigh - impulseRange * 0.382 : impulseDir == -1 ? impulseLow + impulseRange * 0.382 : na
+fib500 = impulseDir == 1 ? impulseHigh - impulseRange * 0.500 : impulseDir == -1 ? impulseLow + impulseRange * 0.500 : na
+fib618 = impulseDir == 1 ? impulseHigh - impulseRange * 0.618 : impulseDir == -1 ? impulseLow + impulseRange * 0.618 : na
+fib786 = impulseDir == 1 ? impulseHigh - impulseRange * 0.786 : impulseDir == -1 ? impulseLow + impulseRange * 0.786 : na
+
+equilibrium = fib500
+discount = not na(equilibrium) and close < equilibrium
+premium = not na(equilibrium) and close > equilibrium
+nearFib = f_near(close, fib273, atr * fibNearAtrMult) or f_near(close, fib382, atr * fibNearAtrMult) or f_near(close, fib500, atr * fibNearAtrMult) or f_near(close, fib618, atr * fibNearAtrMult) or f_near(close, fib786, atr * fibNearAtrMult)
+
+plot(showFib and not cleanChartUi and showFib273 ? fib273 : na, "Fib 0.273", color=color.new(color.yellow, 10), style=plot.style_linebr, display=display.pane)
+plot(showFib and not cleanChartUi and showFib382 ? fib382 : na, "Fib 0.382", color=color.new(color.yellow, 30), style=plot.style_linebr, display=display.pane)
+plot(showFib and not cleanChartUi and showFib500 ? fib500 : na, "Fib 0.500 / Equilibrium", color=color.new(color.white, 20), style=plot.style_linebr, display=display.pane)
+plot(showFib and not cleanChartUi and showFib618 ? fib618 : na, "Fib 0.618", color=color.new(color.yellow, 30), style=plot.style_linebr, display=display.pane)
+plot(showFib and not cleanChartUi and showFib786 ? fib786 : na, "Fib 0.786", color=color.new(color.yellow, 45), style=plot.style_linebr, display=display.pane)
+
+//------------------------------------------------------------------------------
+// VWAP and momentum classifications
+//------------------------------------------------------------------------------
+
+vwapBull = close > vwap and emaFast >= vwap
+vwapBear = close < vwap and emaFast <= vwap
+vwapState = vwapBull ? "BULLISH ALIGNMENT" : vwapBear ? "BEARISH ALIGNMENT" : "NEUTRAL"
+
+momentumState = emaSlope > 0 and rsi > 55 and strongBullImpulse ? "STRONG BULLISH" :
+     emaSlope > 0 and rsi > 50 ? "WEAK BULLISH" :
+     emaSlope < 0 and rsi < 45 and strongBearImpulse ? "STRONG BEARISH" :
+     emaSlope < 0 and rsi < 50 ? "WEAK BEARISH" :
+     "NEUTRAL"
+
+//------------------------------------------------------------------------------
+// Volume profile proxy
+//------------------------------------------------------------------------------
+
+vpPrice = hlc3
+vpVolumeSum = ta.sma(volume, vpLookback) * vpLookback
+vpWeightedSum = ta.sma(vpPrice * volume, vpLookback) * vpLookback
+vpPoc = useVpConfluence and vpVolumeSum > 0 ? vpWeightedSum / vpVolumeSum : na
+vpVarianceSum = ta.sma(math.pow(vpPrice - vpPoc, 2.0) * volume, vpLookback) * vpLookback
+vpDeviation = useVpConfluence and vpVolumeSum > 0 ? math.sqrt(math.max(vpVarianceSum / vpVolumeSum, 0.0)) : na
+vpValueHigh = not na(vpPoc) and not na(vpDeviation) ? vpPoc + vpDeviation * vpValueAreaMult : na
+vpValueLow = not na(vpPoc) and not na(vpDeviation) ? vpPoc - vpDeviation * vpValueAreaMult : na
+vpDataReady = useVpConfluence and not na(vpPoc) and not na(vpValueHigh) and not na(vpValueLow)
+vpNearPoc = vpDataReady and math.abs(close - vpPoc) <= atr * vpRetestAtrMult
+vpBullReclaim = vpDataReady and low < vpValueLow and close > vpPoc and isBullClose
+vpBearReclaim = vpDataReady and high > vpValueHigh and close < vpPoc and isBearClose
+vpBullContinuation = vpDataReady and close > vpPoc and low <= vpPoc + atr * vpRetestAtrMult and isBullClose and (structureDir == 1 or htfBull)
+vpBearContinuation = vpDataReady and close < vpPoc and high >= vpPoc - atr * vpRetestAtrMult and isBearClose and (structureDir == -1 or htfBear)
+vpBullConfluence = vpBullReclaim or vpBullContinuation
+vpBearConfluence = vpBearReclaim or vpBearContinuation
+
+//------------------------------------------------------------------------------
+// Zone permissions and no-trade states
+//------------------------------------------------------------------------------
+
+activeDemand = demandState == "ACTIVE" or demandState == "TESTING" or demandState == "CONFIRMED"
+activeSupply = supplyState == "ACTIVE" or supplyState == "TESTING" or supplyState == "CONFIRMED"
+float htfSupportLevel = na
+if not na(keyPivotLow) and keyPivotLow < close
+    htfSupportLevel := keyPivotLow
+if not na(keyPrevLow) and keyPrevLow < close
+    htfSupportLevel := na(htfSupportLevel) ? keyPrevLow : math.max(htfSupportLevel, keyPrevLow)
+
+float htfResistanceLevel = na
+if not na(keyPivotHigh) and keyPivotHigh > close
+    htfResistanceLevel := keyPivotHigh
+if not na(keyPrevHigh) and keyPrevHigh > close
+    htfResistanceLevel := na(htfResistanceLevel) ? keyPrevHigh : math.min(htfResistanceLevel, keyPrevHigh)
+
+nearHtfSupport = not na(htfSupportLevel) and math.abs(close - htfSupportLevel) <= atr * keyLevelNearAtrMult
+nearHtfResistance = not na(htfResistanceLevel) and math.abs(close - htfResistanceLevel) <= atr * keyLevelNearAtrMult
+htfKeyBullOk = not requireHtfKeyLevel or nearHtfSupport or htfBull or ifvgLongRetest
+htfKeyBearOk = not requireHtfKeyLevel or nearHtfResistance or htfBear or ifvgShortRetest
+sxHtfKeyNear = nearHtfSupport ? 1.0 : nearHtfResistance ? -1.0 : 0.0
+sxHtfKeyLevel = nearHtfSupport ? htfSupportLevel : nearHtfResistance ? htfResistanceLevel : na
+
+float longLiquidityTarget = na
+if not na(eqHighLevel) and eqHighLevel > close
+    longLiquidityTarget := eqHighLevel
+if not na(htfResistanceLevel) and htfResistanceLevel > close
+    longLiquidityTarget := na(longLiquidityTarget) ? htfResistanceLevel : math.min(longLiquidityTarget, htfResistanceLevel)
+if not na(lastSwingHigh) and lastSwingHigh > close
+    longLiquidityTarget := na(longLiquidityTarget) ? lastSwingHigh : math.min(longLiquidityTarget, lastSwingHigh)
+if not na(prevDayHigh) and prevDayHigh > close
+    longLiquidityTarget := na(longLiquidityTarget) ? prevDayHigh : math.min(longLiquidityTarget, prevDayHigh)
+if not na(prevSessionHigh) and prevSessionHigh > close
+    longLiquidityTarget := na(longLiquidityTarget) ? prevSessionHigh : math.min(longLiquidityTarget, prevSessionHigh)
+if not na(rangeHigh) and rangeHigh > close
+    longLiquidityTarget := na(longLiquidityTarget) ? rangeHigh : math.min(longLiquidityTarget, rangeHigh)
+
+float shortLiquidityTarget = na
+if not na(eqLowLevel) and eqLowLevel < close
+    shortLiquidityTarget := eqLowLevel
+if not na(htfSupportLevel) and htfSupportLevel < close
+    shortLiquidityTarget := na(shortLiquidityTarget) ? htfSupportLevel : math.max(shortLiquidityTarget, htfSupportLevel)
+if not na(lastSwingLow) and lastSwingLow < close
+    shortLiquidityTarget := na(shortLiquidityTarget) ? lastSwingLow : math.max(shortLiquidityTarget, lastSwingLow)
+if not na(prevDayLow) and prevDayLow < close
+    shortLiquidityTarget := na(shortLiquidityTarget) ? prevDayLow : math.max(shortLiquidityTarget, prevDayLow)
+if not na(prevSessionLow) and prevSessionLow < close
+    shortLiquidityTarget := na(shortLiquidityTarget) ? prevSessionLow : math.max(shortLiquidityTarget, prevSessionLow)
+if not na(rangeLow) and rangeLow < close
+    shortLiquidityTarget := na(shortLiquidityTarget) ? rangeLow : math.max(shortLiquidityTarget, rangeLow)
+
+hasLongLiquidityTarget = not na(longLiquidityTarget) and longLiquidityTarget > close + syminfo.mintick
+hasShortLiquidityTarget = not na(shortLiquidityTarget) and shortLiquidityTarget < close - syminfo.mintick
+ifvgLongModel = ifvgLongRetest and (not requireLiquidityTarget or hasLongLiquidityTarget)
+ifvgShortModel = ifvgShortRetest and (not requireLiquidityTarget or hasShortLiquidityTarget)
+goldBuyZoneOk = not (premium and htfBear and macroBear) and not isExtremeVol and htfKeyBullOk
+goldSellZoneOk = not (discount and htfBull and macroBull) and not isExtremeVol and htfKeyBearOk
+validBuyZone = ((activeDemand and demandTouched) or bullRetest or (bullSweep and discount) or bullSmtTrap or freshCrtBullConfirm or vpBullConfluence or ifvgLongModel) and (discount or nearFib or bullSweep or bullSmtTrap or freshCrtBullConfirm or vpBullConfluence or bullRetest or ifvgLongModel or structureDir == 1) and goldBuyZoneOk
+validSellZone = ((activeSupply and supplyTouched) or bearRetest or (bearSweep and premium) or bearSmtTrap or freshCrtBearConfirm or vpBearConfluence or ifvgShortModel) and (premium or nearFib or bearSweep or bearSmtTrap or freshCrtBearConfirm or vpBearConfluence or bearRetest or ifvgShortModel or structureDir == -1) and goldSellZoneOk
+
+nearRangeLow = regime == "RANGING" and rangeSize > 0 and rangePosition <= rangeNearPct
+nearRangeHigh = regime == "RANGING" and rangeSize > 0 and rangePosition >= 1.0 - rangeNearPct
+rangeBuySetup = nearRangeLow and (bullSweep or isBullClose or momentumState == "WEAK BULLISH" or momentumState == "STRONG BULLISH")
+rangeSellSetup = nearRangeHigh and (bearSweep or isBearClose or momentumState == "WEAK BEARISH" or momentumState == "STRONG BEARISH")
+
+outsideSession = useSessionFilter and not inSession
+insufficientData = bar_index < math.max(rangeLen, emaSlowLen) + swingLen + 5
+
+dontBuyReason = htfBear and macroBear ? "HTF BEARISH" :
+     requireHtfKeyLevel and not htfKeyBullOk ? "AWAY FROM HTF KEY" :
+     activeSupply and close < supplyHigh and close > supplyLow - atr ? "SUPPLY OVERHEAD" :
+     premium and structureDir != 1 ? "PREMIUM" :
+     failedBullBreakout ? "FAILED BULL SETUP" :
+     isExtremeVol ? "EXTREME VOLATILITY" :
+     "NO CONFIRMATION"
+
+dontSellReason = htfBull and macroBull ? "HTF BULLISH" :
+     requireHtfKeyLevel and not htfKeyBearOk ? "AWAY FROM HTF KEY" :
+     activeDemand and close > demandLow and close < demandHigh + atr ? "DEMAND BELOW" :
+     discount and structureDir != -1 ? "DISCOUNT" :
+     failedBearBreakout ? "FAILED BEAR SETUP" :
+     isExtremeVol ? "EXTREME VOLATILITY" :
+     "NO CONFIRMATION"
+
+dontBuy = dontBuyReason != "NO CONFIRMATION" or not validBuyZone
+dontSell = dontSellReason != "NO CONFIRMATION" or not validSellZone
+
+//------------------------------------------------------------------------------
+// Opportunity score
+//------------------------------------------------------------------------------
+
+longStructureScore = ifvgLongModel ? 20.0 : bullMss ? 20.0 : bullBos ? 18.0 : bullChoch ? 16.0 : structureDir == 1 ? 14.0 : bullRetest ? 12.0 : 0.0
+shortStructureScore = ifvgShortModel ? 20.0 : bearMss ? 20.0 : bearBos ? 18.0 : bearChoch ? 16.0 : structureDir == -1 ? 14.0 : bearRetest ? 12.0 : 0.0
+
+htfTrendStrong = htfAdx >= adxTrendThreshold and htfAtrRatio < atrExtremeRatio
+longHtfScore = nearHtfSupport and htfBull and macroBull ? 15.0 : nearHtfSupport ? 13.0 : htfBull and macroBull and htfTrendStrong ? 12.0 : htfBull and macroBull ? 10.0 : htfBull ? 8.0 : macroBull ? 6.0 : htfBear and macroBear ? 0.0 : 4.0
+shortHtfScore = nearHtfResistance and htfBear and macroBear ? 15.0 : nearHtfResistance ? 13.0 : htfBear and macroBear and htfTrendStrong ? 12.0 : htfBear and macroBear ? 10.0 : htfBear ? 8.0 : macroBear ? 6.0 : htfBull and macroBull ? 0.0 : 4.0
+
+longLiquidityScore = ifvgLongModel ? 15.0 : freshCrtBullConfirm ? 15.0 : bullSmtTrap ? 15.0 : bullSweep ? 13.0 : vpBullConfluence ? 11.0 : f_near(close, eqLowLevel, atr) or f_near(close, prevDayLow, atr) or f_near(close, prevSessionLow, atr) ? 9.0 : 3.0
+shortLiquidityScore = ifvgShortModel ? 15.0 : freshCrtBearConfirm ? 15.0 : bearSmtTrap ? 15.0 : bearSweep ? 13.0 : vpBearConfluence ? 11.0 : f_near(close, eqHighLevel, atr) or f_near(close, prevDayHigh, atr) or f_near(close, prevSessionHigh, atr) ? 9.0 : 3.0
+
+longFibScore = discount and nearFib ? 10.0 : discount ? 7.0 : nearFib ? 5.0 : 1.0
+shortFibScore = premium and nearFib ? 10.0 : premium ? 7.0 : nearFib ? 5.0 : 1.0
+
+longVwapScore = vwapBull ? 10.0 : vwapMode == "Soft" ? 5.0 : vwapState == "NEUTRAL" ? 4.0 : 0.0
+shortVwapScore = vwapBear ? 10.0 : vwapMode == "Soft" ? 5.0 : vwapState == "NEUTRAL" ? 4.0 : 0.0
+
+longMomentumScore = momentumState == "STRONG BULLISH" ? 10.0 : momentumState == "WEAK BULLISH" ? 7.0 : momentumState == "NEUTRAL" ? 4.0 : 0.0
+shortMomentumScore = momentumState == "STRONG BEARISH" ? 10.0 : momentumState == "WEAK BEARISH" ? 7.0 : momentumState == "NEUTRAL" ? 4.0 : 0.0
+
+volumeScore = vpBullConfluence or vpBearConfluence ? 5.0 : volumeState == "HIGH" ? 5.0 : volumeState == "NORMAL" ? 3.0 : 1.0
+
+longZoneScore = ifvgLongModel ? 10.0 : freshCrtBullConfirm and validBuyZone ? 10.0 : validBuyZone ? 9.0 : rangeBuySetup ? 8.0 : activeDemand ? 5.0 : 0.0
+shortZoneScore = ifvgShortModel ? 10.0 : freshCrtBearConfirm and validSellZone ? 10.0 : validSellZone ? 9.0 : rangeSellSetup ? 8.0 : activeSupply ? 5.0 : 0.0
+
+longRegimeScore = regime == "TRENDING_BULL" ? 5.0 : regime == "RANGING" and rangeBuySetup ? 3.0 : regime == "VOLATILE" ? -10.0 : regime == "TRENDING_BEAR" ? -8.0 : 0.0
+shortRegimeScore = regime == "TRENDING_BEAR" ? 5.0 : regime == "RANGING" and rangeSellSetup ? 3.0 : regime == "VOLATILE" ? -10.0 : regime == "TRENDING_BULL" ? -8.0 : 0.0
+
+longScoreRaw = longStructureScore + longHtfScore + longLiquidityScore + longFibScore + longVwapScore + longMomentumScore + volumeScore + longZoneScore + longRegimeScore
+shortScoreRaw = shortStructureScore + shortHtfScore + shortLiquidityScore + shortFibScore + shortVwapScore + shortMomentumScore + volumeScore + shortZoneScore + shortRegimeScore
+longScore = f_clamp(longScoreRaw, 0.0, 100.0)
+shortScore = f_clamp(shortScoreRaw, 0.0, 100.0)
+
+//------------------------------------------------------------------------------
+// Entry confirmation
+//------------------------------------------------------------------------------
+
+bullConfirmedEvent = ifvgLongModel or bullSweep or bullSmtTrap or crtBullConfirm or vpBullConfluence or bullBos or bullChoch or bullRetest or bullMss
+bearConfirmedEvent = ifvgShortModel or bearSweep or bearSmtTrap or crtBearConfirm or vpBearConfluence or bearBos or bearChoch or bearRetest or bearMss
+barsSinceBullConfirmation = ta.barssince(bullConfirmedEvent)
+barsSinceBearConfirmation = ta.barssince(bearConfirmedEvent)
+barsSinceBullSweep = ta.barssince(bullSweep)
+barsSinceBearSweep = ta.barssince(bearSweep)
+freshBullConfirmation = not na(barsSinceBullConfirmation) and barsSinceBullConfirmation <= confirmationFreshBars
+freshBearConfirmation = not na(barsSinceBearConfirmation) and barsSinceBearConfirmation <= confirmationFreshBars
+freshBullSweep = not na(barsSinceBullSweep) and barsSinceBullSweep <= confirmationFreshBars
+freshBearSweep = not na(barsSinceBearSweep) and barsSinceBearSweep <= confirmationFreshBars
+
+bullConfirmationAggressive = isBullClose and (freshBullConfirmation or momentumState == "WEAK BULLISH" or momentumState == "STRONG BULLISH")
+bearConfirmationAggressive = isBearClose and (freshBearConfirmation or momentumState == "WEAK BEARISH" or momentumState == "STRONG BEARISH")
+
+bullConfirmationBalanced = isBullClose and freshBullConfirmation and momentumState != "STRONG BEARISH"
+bearConfirmationBalanced = isBearClose and freshBearConfirmation and momentumState != "STRONG BULLISH"
+
+bullConfirmationConservative = freshBullConfirmation and freshBullSweep and (strongBullImpulse or bodyAtrRatio >= displacementAtrMult * 0.60) and htfBull and macroBull
+bearConfirmationConservative = freshBearConfirmation and freshBearSweep and (strongBearImpulse or bodyAtrRatio >= displacementAtrMult * 0.60) and htfBear and macroBear
+
+bullConfirmation = confirmMode == "Aggressive" ? bullConfirmationAggressive : confirmMode == "Conservative" ? bullConfirmationConservative : bullConfirmationBalanced
+bearConfirmation = confirmMode == "Aggressive" ? bearConfirmationAggressive : confirmMode == "Conservative" ? bearConfirmationConservative : bearConfirmationBalanced
+
+strictVwapLongOk = vwapMode != "Strict" or vwapBull
+strictVwapShortOk = vwapMode != "Strict" or vwapBear
+volumeOk = not strictLowVolumeBlock or volumeState != "LOW"
+
+dailyKey = time("D")
+newDay = ta.change(dailyKey) != 0
+var int entriesToday = 0
+var float dailyClosedProfit = 0.0
+var int consecLossesToday = 0
+var int lastClosedTrades = 0
+
+if newDay
+    entriesToday := 0
+    dailyClosedProfit := 0.0
+    consecLossesToday := 0
+
+if strategy.closedtrades > lastClosedTrades
+    lastProfit = strategy.closedtrades.profit(strategy.closedtrades - 1)
+    dailyClosedProfit := dailyClosedProfit + lastProfit
+    consecLossesToday := lastProfit < 0 ? consecLossesToday + 1 : 0
+    if not cleanChartUi and showDecisionLabels
+        label.new(bar_index, close, lastProfit >= 0 ? "TRADE OUTCOME\nWIN\n" + str.tostring(lastProfit, format.mintick) : "TRADE OUTCOME\nLOSS\n" + str.tostring(lastProfit, format.mintick), xloc=xloc.bar_index, style=lastProfit >= 0 ? label.style_label_up : label.style_label_down, color=lastProfit >= 0 ? color.new(color.green, 0) : color.new(color.red, 0), textcolor=color.white, size=size.tiny)
+    lastClosedTrades := strategy.closedtrades
+
+dailyLossLimitReached = dailyClosedProfit <= -(accountSize * dailyLossLimitPct / 100.0)
+maxTradesReached = entriesToday >= maxTradesPerDay
+maxConsecLossesReached = consecLossesToday >= maxConsecutiveLosses
+dailyStop = dailyLossLimitReached or maxTradesReached or maxConsecLossesReached
+
+//------------------------------------------------------------------------------
+// Risk, entries, exits
+//------------------------------------------------------------------------------
+
+atrLongStop = close - atr * slAtrMult
+atrShortStop = close + atr * slAtrMult
+structLongStop = not na(lastSwingLow) ? lastSwingLow - syminfo.mintick : atrLongStop
+structShortStop = not na(lastSwingHigh) ? lastSwingHigh + syminfo.mintick : atrShortStop
+
+longStopCandidate = slMode == "ATR" ? atrLongStop : slMode == "Structural" ? structLongStop : math.max(atrLongStop, structLongStop)
+shortStopCandidate = slMode == "ATR" ? atrShortStop : slMode == "Structural" ? structShortStop : math.min(atrShortStop, structShortStop)
+
+longRiskDistance = close - longStopCandidate
+shortRiskDistance = shortStopCandidate - close
+riskCash = accountSize * riskPct / 100.0
+longQty = longRiskDistance > 0 ? riskCash / (longRiskDistance * pointValue) : na
+shortQty = shortRiskDistance > 0 ? riskCash / (shortRiskDistance * pointValue) : na
+longRiskOk = not na(longQty) and longQty >= minPositionSize and longRiskDistance > syminfo.mintick
+shortRiskOk = not na(shortQty) and shortQty >= minPositionSize and shortRiskDistance > syminfo.mintick
+xauPipValuePerLot = xauContractOunces * xauPipSize
+xauProjectedStopDistance = math.max(atr * slAtrMult, syminfo.mintick)
+xauProjectedStopPips = xauProjectedStopDistance / xauPipSize
+xauTenPipRiskAtManualLot = 10.0 * xauPipValuePerLot * xauManualLotSize
+xauCapitalForTenPipsAtRisk = riskPct > 0 ? xauTenPipRiskAtManualLot / (riskPct / 100.0) : na
+xauRecommendedLotProjected = xauProjectedStopPips > 0 and xauPipValuePerLot > 0 ? riskCash / (xauProjectedStopPips * xauPipValuePerLot) : na
+xauManualRiskProjected = xauProjectedStopPips * xauPipValuePerLot * xauManualLotSize
+xauManualRiskPctProjected = accountSize > 0 ? xauManualRiskProjected / accountSize * 100.0 : na
+xauAutoLongLot = not na(longQty) ? longQty / xauContractOunces : na
+xauAutoShortLot = not na(shortQty) ? shortQty / xauContractOunces : na
+xauManualLotTooLarge = showLotRiskAwareness and not na(xauRecommendedLotProjected) and xauManualLotSize > xauRecommendedLotProjected
+xauRiskStatus = xauManualLotTooLarge ? "LOT TOO LARGE" : "LOT OK"
+
+dailyReason = dailyLossLimitReached ? "DAILY LIMIT REACHED" : maxTradesReached ? "MAX TRADES REACHED" : maxConsecLossesReached ? "MAX LOSSES REACHED" : "OK"
+noTradeReason = insufficientData ? "INSUFFICIENT DATA" :
+     outsideSession ? "OUTSIDE SESSION" :
+     dailyStop ? dailyReason :
+     blockOversizedManualLot and xauManualLotTooLarge ? "MANUAL LOT TOO LARGE" :
+     isExtremeVol ? "EXTREME VOLATILITY" :
+     midRangeNoTrade ? "MID-RANGE" :
+     longScore < tradeThreshold and shortScore < tradeThreshold ? "SCORE TOO LOW" :
+     "NONE"
+
+noTrade = noTradeReason != "NONE"
+
+validLongContext = not noTrade and (regime == "TRENDING_BULL" or regime == "RANGING" or regime == "NEUTRAL") and not (htfBear and macroBear)
+validShortContext = not noTrade and (regime == "TRENDING_BEAR" or regime == "RANGING" or regime == "NEUTRAL") and not (htfBull and macroBull)
+
+longSetup = (validBuyZone or rangeBuySetup) and (structureDir == 1 or bullBos or bullChoch or bullMss or freshCrtBullConfirm or vpBullConfluence or ifvgLongModel or rangeBuySetup)
+shortSetup = (validSellZone or rangeSellSetup) and (structureDir == -1 or bearBos or bearChoch or bearMss or freshCrtBearConfirm or vpBearConfluence or ifvgShortModel or rangeSellSetup)
+
+preTradeThreshold = math.max(1.0, float(tradeThreshold - preTradeScoreBuffer))
+preTradeBlocked = insufficientData or outsideSession or dailyStop or isExtremeVol or midRangeNoTrade or (blockOversizedManualLot and xauManualLotTooLarge) or strategy.position_size != 0
+preTradeTriggerBuffer = preTradeTriggerTicks * syminfo.mintick
+longPrepareSetup = showPreTradePlan and not preTradeBlocked and longSetup and (bullConfirmation or freshBullConfirmation or bullSmtTrap or freshCrtBullConfirm or vpBullConfluence or ifvgLongModel or bullRetest) and strictVwapLongOk and volumeOk and longScore >= preTradeThreshold and not (htfBear and macroBear)
+shortPrepareSetup = showPreTradePlan and not preTradeBlocked and shortSetup and (bearConfirmation or freshBearConfirmation or bearSmtTrap or freshCrtBearConfirm or vpBearConfluence or ifvgShortModel or bearRetest) and strictVwapShortOk and volumeOk and shortScore >= preTradeThreshold and not (htfBull and macroBull)
+longPrepareEntryRaw = longPrepareSetup ? high + preTradeTriggerBuffer : na
+shortPrepareEntryRaw = shortPrepareSetup ? low - preTradeTriggerBuffer : na
+longPrepareRisk = not na(longPrepareEntryRaw) ? longPrepareEntryRaw - longStopCandidate : na
+shortPrepareRisk = not na(shortPrepareEntryRaw) ? shortStopCandidate - shortPrepareEntryRaw : na
+longPrepare = longPrepareSetup and not na(longPrepareRisk) and longPrepareRisk > syminfo.mintick
+shortPrepare = shortPrepareSetup and not na(shortPrepareRisk) and shortPrepareRisk > syminfo.mintick and not longPrepare
+longPrepareEntry = longPrepare ? longPrepareEntryRaw : na
+shortPrepareEntry = shortPrepare ? shortPrepareEntryRaw : na
+longPrepareSl = longPrepare ? longStopCandidate : na
+shortPrepareSl = shortPrepare ? shortStopCandidate : na
+longPrepareLiquidityR = longPrepare and hasLongLiquidityTarget ? (longLiquidityTarget - longPrepareEntry) / longPrepareRisk : na
+shortPrepareLiquidityR = shortPrepare and hasShortLiquidityTarget ? (shortPrepareEntry - shortLiquidityTarget) / shortPrepareRisk : na
+longPrepareTp = longPrepare ? (useLiquidityTargetForTp and not na(longPrepareLiquidityR) and longPrepareLiquidityR >= minLiquidityTargetR ? longLiquidityTarget : longPrepareEntry + longPrepareRisk * rrChoice) : na
+shortPrepareTp = shortPrepare ? (useLiquidityTargetForTp and not na(shortPrepareLiquidityR) and shortPrepareLiquidityR >= minLiquidityTargetR ? shortLiquidityTarget : shortPrepareEntry - shortPrepareRisk * rrChoice) : na
+longPreparePips = longPrepare ? longPrepareRisk / xauPipSize : na
+shortPreparePips = shortPrepare ? shortPrepareRisk / xauPipSize : na
+preTradeDirection = longPrepare ? 1.0 : shortPrepare ? -1.0 : 0.0
+
+longEntrySignal = barstate.isconfirmed and strategy.position_size == 0 and validLongContext and longSetup and bullConfirmation and strictVwapLongOk and volumeOk and longScore >= tradeThreshold and longRiskOk
+shortEntrySignal = barstate.isconfirmed and strategy.position_size == 0 and validShortContext and shortSetup and bearConfirmation and strictVwapShortOk and volumeOk and shortScore >= tradeThreshold and shortRiskOk
+
+var float activeLongStop = na
+var float activeLongTp = na
+var float activeLongRisk = na
+var float activeShortStop = na
+var float activeShortTp = na
+var float activeShortRisk = na
+
+if longEntrySignal
+    activeLongStop := longStopCandidate
+    activeLongRisk := longRiskDistance
+    longLiquidityR = hasLongLiquidityTarget ? (longLiquidityTarget - close) / activeLongRisk : na
+    activeLongTp := useLiquidityTargetForTp and not na(longLiquidityR) and longLiquidityR >= minLiquidityTargetR ? longLiquidityTarget : close + activeLongRisk * rrChoice
+    strategy.entry("SENTINEL-L", strategy.long, qty=longQty, comment="LONG " + f_grade(longScore))
+    strategy.exit("SENTINEL-LX", "SENTINEL-L", stop=activeLongStop, limit=activeLongTp, comment="SL/TP")
+    entriesToday := entriesToday + 1
+    if not cleanChartUi and showDecisionLabels
+        label.new(bar_index, low, "LONG\nScore " + str.tostring(math.round(longScore)) + " " + f_grade(longScore) + "\nSL " + str.tostring(activeLongStop, format.mintick) + "\nTP " + str.tostring(activeLongTp, format.mintick) + "\nRR " + str.tostring(rrChoice), xloc=xloc.bar_index, style=label.style_label_up, color=color.new(color.green, 0), textcolor=color.white, size=size.small)
+
+if shortEntrySignal
+    activeShortStop := shortStopCandidate
+    activeShortRisk := shortRiskDistance
+    shortLiquidityR = hasShortLiquidityTarget ? (close - shortLiquidityTarget) / activeShortRisk : na
+    activeShortTp := useLiquidityTargetForTp and not na(shortLiquidityR) and shortLiquidityR >= minLiquidityTargetR ? shortLiquidityTarget : close - activeShortRisk * rrChoice
+    strategy.entry("SENTINEL-S", strategy.short, qty=shortQty, comment="SHORT " + f_grade(shortScore))
+    strategy.exit("SENTINEL-SX", "SENTINEL-S", stop=activeShortStop, limit=activeShortTp, comment="SL/TP")
+    entriesToday := entriesToday + 1
+    if not cleanChartUi and showDecisionLabels
+        label.new(bar_index, high, "SHORT\nScore " + str.tostring(math.round(shortScore)) + " " + f_grade(shortScore) + "\nSL " + str.tostring(activeShortStop, format.mintick) + "\nTP " + str.tostring(activeShortTp, format.mintick) + "\nRR " + str.tostring(rrChoice), xloc=xloc.bar_index, style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.small)
+
+if strategy.position_size > 0
+    beStop = strategy.position_avg_price + beBufferTicks * syminfo.mintick
+    trailStop = close - atr * trailAtrMult
+    nextStop = activeLongStop
+    if moveToBE and not na(activeLongRisk) and high >= strategy.position_avg_price + activeLongRisk
+        nextStop := math.max(nextStop, beStop)
+    if useTrailingStop
+        nextStop := math.max(nextStop, trailStop)
+    activeLongStop := nextStop
+    strategy.exit("SENTINEL-LX", "SENTINEL-L", stop=activeLongStop, limit=activeLongTp, comment="Managed Exit")
+
+if strategy.position_size < 0
+    beStop = strategy.position_avg_price - beBufferTicks * syminfo.mintick
+    trailStop = close + atr * trailAtrMult
+    nextStop = activeShortStop
+    if moveToBE and not na(activeShortRisk) and low <= strategy.position_avg_price - activeShortRisk
+        nextStop := math.min(nextStop, beStop)
+    if useTrailingStop
+        nextStop := math.min(nextStop, trailStop)
+    activeShortStop := nextStop
+    strategy.exit("SENTINEL-SX", "SENTINEL-S", stop=activeShortStop, limit=activeShortTp, comment="Managed Exit")
+
+if strategy.position_size == 0 and strategy.position_size[1] != 0
+    activeLongStop := na
+    activeLongTp := na
+    activeLongRisk := na
+    activeShortStop := na
+    activeShortTp := na
+    activeShortRisk := na
+
+//------------------------------------------------------------------------------
+// Display and alerts
+//------------------------------------------------------------------------------
+
+plot(showCoreTrendLines and not cleanChartUi ? emaFast : na, "EMA Fast", color=color.new(color.green, 0), display=display.pane)
+plot(showCoreTrendLines and not cleanChartUi ? emaSlow : na, "EMA Slow", color=color.new(color.red, 0), display=display.pane)
+plot(showCoreTrendLines and not cleanChartUi ? vwap : na, "Session VWAP", color=color.new(color.blue, 0), linewidth=2, display=display.pane)
+plot(not cleanChartUi and regime == "RANGING" ? rangeHigh : na, "Range High", color=color.new(color.gray, 45), style=plot.style_linebr, display=display.pane)
+plot(not cleanChartUi and regime == "RANGING" ? rangeLow : na, "Range Low", color=color.new(color.gray, 45), style=plot.style_linebr, display=display.pane)
+plot(not cleanChartUi and regime == "RANGING" ? rangeMid : na, "Range Mid", color=color.new(color.gray, 65), style=plot.style_linebr, display=display.pane)
+plot(showCrtLevels and not cleanChartUi and crtActive ? crtHigh : na, "CRT CRH", color=color.new(color.aqua, 20), style=plot.style_linebr, linewidth=2, display=display.pane)
+plot(showCrtLevels and not cleanChartUi and crtActive ? crtLow : na, "CRT CRL", color=color.new(color.aqua, 20), style=plot.style_linebr, linewidth=2, display=display.pane)
+plot(showVpLevels and not cleanChartUi ? vpPoc : na, "Volume Profile POC Proxy", color=color.new(color.purple, 0), style=plot.style_linebr, linewidth=2, display=display.pane)
+plot(showVpLevels and not cleanChartUi ? vpValueHigh : na, "Volume Profile Value High", color=color.new(color.purple, 45), style=plot.style_linebr, display=display.pane)
+plot(showVpLevels and not cleanChartUi ? vpValueLow : na, "Volume Profile Value Low", color=color.new(color.purple, 45), style=plot.style_linebr, display=display.pane)
+
+showTradeLevelPlots = showTradeLevels and not cleanChartUi
+showPreTradeLevelPlots = showPreTradePlanLines and not cleanChartUi
+tradeEntryPlot = showTradeLevelPlots and strategy.position_size != 0 ? strategy.position_avg_price : na
+tradeStopPlot = showTradeLevelPlots ? (strategy.position_size > 0 ? activeLongStop : strategy.position_size < 0 ? activeShortStop : na) : na
+tradeTargetPlot = showTradeLevelPlots ? (strategy.position_size > 0 ? activeLongTp : strategy.position_size < 0 ? activeShortTp : na) : na
+plot(tradeEntryPlot, "ENTRY", color=color.new(color.white, 0), style=plot.style_linebr, linewidth=2, display=display.pane)
+plot(tradeStopPlot, "SL", color=color.new(color.red, 0), style=plot.style_linebr, linewidth=2, display=display.pane)
+plot(tradeTargetPlot, "TP", color=color.new(color.green, 0), style=plot.style_linebr, linewidth=2, display=display.pane)
+plot(showPreTradeLevelPlots ? longPrepareEntry : na, "PREP Long Trigger Line", color=color.new(color.lime, 0), style=plot.style_linebr, linewidth=2, display=display.pane)
+plot(showPreTradeLevelPlots ? longPrepareSl : na, "PREP Long SL Line", color=color.new(color.red, 0), style=plot.style_linebr, linewidth=1, display=display.pane)
+plot(showPreTradeLevelPlots ? longPrepareTp : na, "PREP Long TP Line", color=color.new(color.green, 0), style=plot.style_linebr, linewidth=1, display=display.pane)
+plot(showPreTradeLevelPlots ? shortPrepareEntry : na, "PREP Short Trigger Line", color=color.new(color.red, 0), style=plot.style_linebr, linewidth=2, display=display.pane)
+plot(showPreTradeLevelPlots ? shortPrepareSl : na, "PREP Short SL Line", color=color.new(color.red, 0), style=plot.style_linebr, linewidth=1, display=display.pane)
+plot(showPreTradeLevelPlots ? shortPrepareTp : na, "PREP Short TP Line", color=color.new(color.green, 0), style=plot.style_linebr, linewidth=1, display=display.pane)
+sxInLong = strategy.position_size > 0
+sxInShort = strategy.position_size < 0
+sxDirection = sxInLong ? 1.0 : sxInShort ? -1.0 : preTradeDirection
+sxEntry = sxInLong or sxInShort ? strategy.position_avg_price : longPrepare ? longPrepareEntry : shortPrepare ? shortPrepareEntry : na
+sxStop = sxInLong ? activeLongStop : sxInShort ? activeShortStop : longPrepare ? longPrepareSl : shortPrepare ? shortPrepareSl : na
+sxTarget = sxInLong ? activeLongTp : sxInShort ? activeShortTp : longPrepare ? longPrepareTp : shortPrepare ? shortPrepareTp : na
+sxRiskPips = sxInLong ? activeLongRisk / xauPipSize : sxInShort ? activeShortRisk / xauPipSize : longPrepare ? longPreparePips : shortPrepare ? shortPreparePips : na
+sxScore = sxDirection > 0 ? longScore : sxDirection < 0 ? shortScore : math.max(longScore, shortScore)
+sxIfvg = ifvgLongModel ? 1.0 : ifvgShortModel ? -1.0 : 0.0
+sxLiquidityTarget = sxDirection > 0 ? longLiquidityTarget : sxDirection < 0 ? shortLiquidityTarget : na
+plot(sxDirection, "SX Direction 1L -1S", color=color.new(color.white, 100), display=display.data_window)
+plot(sxEntry, "SX Entry/Trigger", color=color.new(color.white, 100), display=display.data_window)
+plot(sxStop, "SX Stop Loss", color=color.new(color.red, 100), display=display.data_window)
+plot(sxTarget, "SX Take Profit", color=color.new(color.green, 100), display=display.data_window)
+plot(sxRiskPips, "SX Risk Pips", color=color.new(color.orange, 100), display=display.data_window)
+plot(sxScore, "SX Score", color=color.new(color.aqua, 100), display=display.data_window)
+plot(noTrade ? 1.0 : 0.0, "SX No Trade", color=color.new(color.gray, 100), display=display.data_window)
+plot(sxIfvg, "SX iFVG Retest", color=color.new(color.purple, 100), display=display.data_window)
+plot(sxHtfKeyNear, "SX HTF Key Near", color=color.new(color.blue, 100), display=display.data_window)
+plot(sxHtfKeyLevel, "SX HTF Key Level", color=color.new(color.blue, 100), display=display.data_window)
+plot(sxLiquidityTarget, "SX Liquidity Target", color=color.new(color.yellow, 100), display=display.data_window)
+plot(xauRecommendedLotProjected, "SX Max XAU Lot", color=color.new(color.orange, 100), display=display.data_window)
+
+stateBgColor = longEntrySignal ? color.new(color.green, 82) :
+     shortEntrySignal ? color.new(color.red, 82) :
+     validBuyZone or rangeBuySetup ? color.new(color.green, 92) :
+     validSellZone or rangeSellSetup ? color.new(color.red, 92) :
+     noTrade ? color.new(color.gray, 94) :
+     na
+bgcolor(showStateBackground ? stateBgColor : na, title="Sentinel X visual state")
+
+buyZonePulse = validBuyZone and not validBuyZone[1]
+sellZonePulse = validSellZone and not validSellZone[1]
+rangeBuyPulse = rangeBuySetup and not rangeBuySetup[1] and not validBuyZone
+rangeSellPulse = rangeSellSetup and not rangeSellSetup[1] and not validSellZone
+lotRiskPulse = xauManualLotTooLarge and not xauManualLotTooLarge[1]
+crtLongManipPulse = crtLongManipulation and not crtLongManipulation[1]
+crtShortManipPulse = crtShortManipulation and not crtShortManipulation[1]
+bullSmtPulse = bullSmtTrap and not bullSmtTrap[1]
+bearSmtPulse = bearSmtTrap and not bearSmtTrap[1]
+longPreparePulse = longPrepare and not longPrepare[1]
+shortPreparePulse = shortPrepare and not shortPrepare[1]
+ifvgLongPulse = ifvgLongModel and not ifvgLongModel[1]
+ifvgShortPulse = ifvgShortModel and not ifvgShortModel[1]
+
+if showEventChartLabels and strongBullImpulse
+    label.new(bar_index, low, "IMP", xloc=xloc.bar_index, style=label.style_label_up, color=color.new(color.green, 45), textcolor=color.white, size=size.tiny)
+if showEventChartLabels and strongBearImpulse
+    label.new(bar_index, high, "IMP", xloc=xloc.bar_index, style=label.style_label_down, color=color.new(color.red, 45), textcolor=color.white, size=size.tiny)
+if showEventChartLabels and bullPullback
+    label.new(bar_index, low, "PB", xloc=xloc.bar_index, style=label.style_label_up, color=color.new(color.green, 55), textcolor=color.white, size=size.tiny)
+if showEventChartLabels and bearPullback
+    label.new(bar_index, high, "PB", xloc=xloc.bar_index, style=label.style_label_down, color=color.new(color.red, 55), textcolor=color.white, size=size.tiny)
+if showSetupChartMarkers and buyZonePulse
+    label.new(bar_index, low, "BUY ZONE", xloc=xloc.bar_index, style=label.style_label_up, color=color.new(color.green, 0), textcolor=color.white, size=size.tiny)
+if showSetupChartMarkers and sellZonePulse
+    label.new(bar_index, high, "SELL ZONE", xloc=xloc.bar_index, style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.tiny)
+if showSetupChartMarkers and rangeBuyPulse
+    label.new(bar_index, low, "RANGE BUY", xloc=xloc.bar_index, style=label.style_label_up, color=color.new(color.teal, 0), textcolor=color.white, size=size.tiny)
+if showSetupChartMarkers and rangeSellPulse
+    label.new(bar_index, high, "RANGE SELL", xloc=xloc.bar_index, style=label.style_label_down, color=color.new(color.orange, 0), textcolor=color.white, size=size.tiny)
+if showSmtChartMarkers and bullSmtPulse
+    label.new(bar_index, low, "SMT", xloc=xloc.bar_index, style=label.style_label_up, color=color.new(color.aqua, 0), textcolor=color.black, size=size.tiny)
+if showSmtChartMarkers and bearSmtPulse
+    label.new(bar_index, high, "SMT", xloc=xloc.bar_index, style=label.style_label_down, color=color.new(color.aqua, 0), textcolor=color.black, size=size.tiny)
+if showCrtChartMarkers and crtLongManipPulse
+    label.new(bar_index, low, "CRT MANIP", xloc=xloc.bar_index, style=label.style_label_up, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny)
+if showCrtChartMarkers and crtShortManipPulse
+    label.new(bar_index, high, "CRT MANIP", xloc=xloc.bar_index, style=label.style_label_down, color=color.new(color.yellow, 0), textcolor=color.black, size=size.tiny)
+if showCrtChartMarkers and crtBullConfirm
+    label.new(bar_index, low, "CRT LONG", xloc=xloc.bar_index, style=label.style_label_up, color=color.new(color.lime, 0), textcolor=color.black, size=size.tiny)
+if showCrtChartMarkers and crtBearConfirm
+    label.new(bar_index, high, "CRT SHORT", xloc=xloc.bar_index, style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.tiny)
+if showSetupChartMarkers and lotRiskPulse
+    label.new(bar_index, high, "LOT RISK", xloc=xloc.bar_index, style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.tiny)
+if showSetupChartMarkers and longPreparePulse
+    label.new(bar_index, low, "PREP LONG", xloc=xloc.bar_index, style=label.style_label_up, color=color.new(color.lime, 0), textcolor=color.black, size=size.tiny)
+if showSetupChartMarkers and shortPreparePulse
+    label.new(bar_index, high, "PREP SHORT", xloc=xloc.bar_index, style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.tiny)
+if showSetupChartMarkers and ifvgLongPulse
+    label.new(bar_index, low, "iFVG LONG", xloc=xloc.bar_index, style=label.style_label_up, color=color.new(color.purple, 0), textcolor=color.white, size=size.tiny)
+if showSetupChartMarkers and ifvgShortPulse
+    label.new(bar_index, high, "iFVG SHORT", xloc=xloc.bar_index, style=label.style_label_down, color=color.new(color.purple, 0), textcolor=color.white, size=size.tiny)
+
+decision = longEntrySignal ? "LONG" : shortEntrySignal ? "SHORT" : longPrepare ? "PREP LONG" : shortPrepare ? "PREP SHORT" : noTrade ? "NO TRADE: " + noTradeReason : validBuyZone ? "BUY ZONE" : validSellZone ? "SELL ZONE" : rangeBuySetup ? "RANGE BUY" : rangeSellSetup ? "RANGE SELL" : "WAIT"
+var string lastDecision = ""
+
+if showDecisionLabels and barstate.isconfirmed and decision != lastDecision
+    decisionColor = str.contains(decision, "LONG") or str.contains(decision, "BUY") ? color.new(color.green, 10) : str.contains(decision, "SHORT") or str.contains(decision, "SELL") ? color.new(color.red, 10) : color.new(color.gray, 35)
+    label.new(bar_index, close, decision, xloc=xloc.bar_index, style=label.style_label_left, color=decisionColor, textcolor=color.white, size=size.tiny)
+    lastDecision := decision
+
+if sendPreTradeAlerts and longPreparePulse
+    alert("SENTINEL X PREP LONG | trigger " + str.tostring(longPrepareEntry, format.mintick) + " | SL " + str.tostring(longPrepareSl, format.mintick) + " | TP " + str.tostring(longPrepareTp, format.mintick) + " | liquidity " + str.tostring(longLiquidityTarget, format.mintick) + " | risk " + str.tostring(longPreparePips, "#.#") + " pips", alert.freq_once_per_bar_close)
+
+if sendPreTradeAlerts and shortPreparePulse
+    alert("SENTINEL X PREP SHORT | trigger " + str.tostring(shortPrepareEntry, format.mintick) + " | SL " + str.tostring(shortPrepareSl, format.mintick) + " | TP " + str.tostring(shortPrepareTp, format.mintick) + " | liquidity " + str.tostring(shortLiquidityTarget, format.mintick) + " | risk " + str.tostring(shortPreparePips, "#.#") + " pips", alert.freq_once_per_bar_close)
+
+if ifvgLongPulse
+    alert("SENTINEL X iFVG LONG | MSS + inverted FVG retest | liquidity " + str.tostring(longLiquidityTarget, format.mintick), alert.freq_once_per_bar_close)
+
+if ifvgShortPulse
+    alert("SENTINEL X iFVG SHORT | MSS + inverted FVG retest | liquidity " + str.tostring(shortLiquidityTarget, format.mintick), alert.freq_once_per_bar_close)
+
+if longEntrySignal
+    alert("SENTINEL X LONG | entry " + str.tostring(close, format.mintick) + " | SL " + str.tostring(activeLongStop, format.mintick) + " | TP " + str.tostring(activeLongTp, format.mintick) + " | score " + str.tostring(math.round(longScore)), alert.freq_once_per_bar_close)
+
+if shortEntrySignal
+    alert("SENTINEL X SHORT | entry " + str.tostring(close, format.mintick) + " | SL " + str.tostring(activeShortStop, format.mintick) + " | TP " + str.tostring(activeShortTp, format.mintick) + " | score " + str.tostring(math.round(shortScore)), alert.freq_once_per_bar_close)
+
+if dailyStop and not dailyStop[1]
+    alert("SENTINEL X DAILY LIMIT | " + dailyReason + " | trading blocked for today", alert.freq_once_per_bar_close)
+
+if xauManualLotTooLarge and not xauManualLotTooLarge[1]
+    alert("SENTINEL X XAU LOT RISK | monitored lot " + str.tostring(xauManualLotSize, "#.##") + " is above recommended max " + str.tostring(xauRecommendedLotProjected, "#.##"), alert.freq_once_per_bar_close)
+
+var table dash = table.new(f_dashboardPosition(dashboardPositionInput), 4, 11, border_width=1)
+
+showDashboardTable = showDashboard and not cleanChartUi and not forceNoChartHud and dashboardMode != "Off"
+
+if showDashboardTable and barstate.islast
+    table.cell(dash, 0, 0, "SENTINEL X", bgcolor=color.new(color.black, 0), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 0, "LONG", bgcolor=color.new(color.green, 25), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 2, 0, "SHORT", bgcolor=color.new(color.red, 25), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 3, 0, "STATE", bgcolor=color.new(color.gray, 25), text_color=color.white, text_size=size.tiny)
+
+    table.cell(dash, 0, 1, "Score", bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 1, str.tostring(math.round(longScore)) + " " + f_grade(longScore), bgcolor=color.new(color.black, 10), text_color=color.lime, text_size=size.tiny)
+    table.cell(dash, 2, 1, str.tostring(math.round(shortScore)) + " " + f_grade(shortScore), bgcolor=color.new(color.black, 10), text_color=color.red, text_size=size.tiny)
+    table.cell(dash, 3, 1, decision, bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
+
+    table.cell(dash, 0, 2, "Trend", bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 2, htfBull ? "HTF BULL" : "HTF MIX", bgcolor=color.new(color.black, 10), text_color=htfBull ? color.lime : color.silver, text_size=size.tiny)
+    table.cell(dash, 2, 2, htfBear ? "HTF BEAR" : "HTF MIX", bgcolor=color.new(color.black, 10), text_color=htfBear ? color.red : color.silver, text_size=size.tiny)
+    table.cell(dash, 3, 2, regime, bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
+
+    table.cell(dash, 0, 3, "Setup", bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 3, validBuyZone ? "BUY ZONE" : rangeBuySetup ? "RANGE BUY" : "WAIT", bgcolor=color.new(color.black, 10), text_color=validBuyZone or rangeBuySetup ? color.lime : color.silver, text_size=size.tiny)
+    table.cell(dash, 2, 3, validSellZone ? "SELL ZONE" : rangeSellSetup ? "RANGE SELL" : "WAIT", bgcolor=color.new(color.black, 10), text_color=validSellZone or rangeSellSetup ? color.red : color.silver, text_size=size.tiny)
+    table.cell(dash, 3, 3, bullConfirmation ? "BULL OK" : bearConfirmation ? "BEAR OK" : "NO CONFIRM", bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
+
+    table.cell(dash, 0, 4, "SMT", bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 4, bullSmtTrap ? "BULL TRAP" : "NONE", bgcolor=color.new(color.black, 10), text_color=bullSmtTrap ? color.aqua : color.silver, text_size=size.tiny)
+    table.cell(dash, 2, 4, bearSmtTrap ? "BEAR TRAP" : "NONE", bgcolor=color.new(color.black, 10), text_color=bearSmtTrap ? color.aqua : color.silver, text_size=size.tiny)
+    table.cell(dash, 3, 4, smtSymbol, bgcolor=color.new(color.black, 10), text_color=color.silver, text_size=size.tiny)
+
+    table.cell(dash, 0, 5, "CRT", bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 5, crtActive ? "CRH " + str.tostring(crtHigh, format.mintick) : "NO RANGE", bgcolor=color.new(color.black, 10), text_color=crtActive ? color.aqua : color.silver, text_size=size.tiny)
+    table.cell(dash, 2, 5, crtActive ? "CRL " + str.tostring(crtLow, format.mintick) : "", bgcolor=color.new(color.black, 10), text_color=crtActive ? color.aqua : color.silver, text_size=size.tiny)
+    table.cell(dash, 3, 5, crtState, bgcolor=color.new(color.black, 10), text_color=crtBullConfirm ? color.lime : crtBearConfirm ? color.red : color.white, text_size=size.tiny)
+
+    table.cell(dash, 0, 6, "Lot Risk", bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 6, "Lot " + str.tostring(xauManualLotSize, "#.##"), bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 2, 6, "$" + str.tostring(xauManualRiskProjected, "#.##"), bgcolor=color.new(color.black, 10), text_color=xauManualLotTooLarge ? color.red : color.lime, text_size=size.tiny)
+    table.cell(dash, 3, 6, str.tostring(xauManualRiskPctProjected, "#.##") + "%", bgcolor=color.new(color.black, 10), text_color=xauManualLotTooLarge ? color.red : color.lime, text_size=size.tiny)
+
+    table.cell(dash, 0, 7, "Guide", bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 7, "10p $" + str.tostring(xauTenPipRiskAtManualLot, "#.##"), bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 2, 7, "Max " + str.tostring(xauRecommendedLotProjected, "#.##"), bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 3, 7, xauRiskStatus, bgcolor=color.new(color.black, 10), text_color=xauManualLotTooLarge ? color.red : color.lime, text_size=size.tiny)
+
+    table.cell(dash, 0, 8, "Daily", bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 8, str.tostring(entriesToday) + "/" + str.tostring(maxTradesPerDay), bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 2, 8, "L " + str.tostring(consecLossesToday), bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 3, 8, dailyReason, bgcolor=color.new(color.black, 10), text_color=dailyStop ? color.red : color.lime, text_size=size.tiny)
+
+    table.cell(dash, 0, 9, "Why", bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 9, dontBuyReason, bgcolor=color.new(color.black, 10), text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 2, 9, dontSellReason, bgcolor=color.new(color.black, 10), text_color=color.silver, text_size=size.tiny)
+    table.cell(dash, 3, 9, noTradeReason, bgcolor=color.new(color.black, 10), text_color=noTrade ? color.orange : color.lime, text_size=size.tiny)
+
+    table.cell(dash, 0, 10, "Mode", bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 10, confirmMode, bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 2, 10, visualDensity, bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 3, 10, timeframe.period, bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
+
+if not showDashboardTable and barstate.islast
+    table.clear(dash, 0, 0, 3, 10)
