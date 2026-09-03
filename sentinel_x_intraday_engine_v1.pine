@@ -235,15 +235,9 @@ showSmtChartMarkers = not cleanChartUi and showSmtMarkers
 showCrtChartMarkers = not cleanChartUi and showCrtMarkers
 showChartBoxes = not cleanChartUi and showZones
 
-if barstate.isfirst
-    if na(chartSec) or na(htfSec) or htfSec <= chartSec
-        runtime.error("Selected higher timeframe must be greater than the chart timeframe.")
-    if useMacroTf and (na(macroSec) or macroSec <= chartSec)
-        runtime.error("Selected macro timeframe must be greater than the chart timeframe.")
-    if requireHtfKeyLevel and (na(keyLevelSec) or keyLevelSec <= chartSec)
-        runtime.error("Selected HTF key-level timeframe must be greater than the chart timeframe.")
-    if useCrt and (na(crtSec) or crtSec <= chartSec)
-        runtime.error("Selected CRT accumulation timeframe must be greater than the chart timeframe.")
+// Non-blocking timeframe check (allows smooth execution on all chart timeframes)
+invalidTfConfig = (not na(chartSec) and not na(htfSec) and htfSec <= chartSec)
+
 
 //------------------------------------------------------------------------------
 // Core measurements
