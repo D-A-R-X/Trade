@@ -1288,7 +1288,7 @@ plot(sxHtfKeyNear, "SX HTF Key Near", color=color.new(color.blue, 100), display=
 plot(sxHtfKeyLevel, "SX HTF Key Level", color=color.new(color.blue, 100), display=display.data_window)
 plot(sxLiquidityTarget, "SX Liquidity Target", color=color.new(color.yellow, 100), display=display.data_window)
 plot(xauRecommendedLotProjected, "SX Max XAU Lot", color=color.new(color.orange, 100), display=display.data_window)
-plot(sxEntryTimeHHMM, "SX Entry Time (HHMM UTC-3)", color=color.new(color.cyan, 100), display=display.data_window)
+plot(sxEntryTimeHHMM, "SX Entry Time (HHMM UTC-3)", color=color.new(color.aqua, 100), display=display.data_window)
 
 stateBgColor = longEntrySignal ? color.new(color.green, 82) :
      shortEntrySignal ? color.new(color.red, 82) :
@@ -1433,7 +1433,7 @@ if showDashboardTable and barstate.islast
     table.cell(dash, 0, 11, "Time", bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
     table.cell(dash, 1, 11, str.format_time(time, "HH:mm", displayTz) + " (" + displayTz + ")", bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
     table.cell(dash, 2, 11, "Entry Time", bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
-    table.cell(dash, 3, 11, lastEntryTimeStr, bgcolor=color.new(color.black, 10), text_color=color.cyan, text_size=size.tiny)
+    table.cell(dash, 3, 11, lastEntryTimeStr, bgcolor=color.new(color.black, 10), text_color=color.aqua, text_size=size.tiny)
 
 if not showDashboardTable and barstate.islast
     table.clear(dash, 0, 0, 3, 11)
