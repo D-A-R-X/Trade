@@ -32,6 +32,7 @@ tradeSession = input.session("0000-2359", "Trading session", group=grpTf, displa
 useSessionFilter = input.bool(false, "Only trade inside session", group=grpTf, display=display.none)
 showCoreTrendLines = input.bool(false, "Show EMA/VWAP lines", group=grpTf, display=display.none)
 showContextLevels = input.bool(false, "Show PDH/PDL/session levels", group=grpTf, display=display.none)
+displayTz = input.string("UTC-3", "Display & Alert Timezone", group=grpTf, options=["UTC-3", "UTC-5", "UTC+0", "UTC+5:30", "America/New_York", "UTC"], display=display.none)
 
 grpRegime = "02. Regime"
 emaFastLen = input.int(20, "EMA fast length", minval=1, group=grpRegime, display=display.none)
@@ -1254,27 +1255,6 @@ sxRiskPips = sxInLong ? activeLongRisk / xauPipSize : sxInShort ? activeShortRis
 sxScore = sxDirection > 0 ? longScore : sxDirection < 0 ? shortScore : math.max(longScore, shortScore)
 sxIfvg = ifvgLongModel ? 1.0 : ifvgShortModel ? -1.0 : 0.0
 sxLiquidityTarget = sxDirection > 0 ? longLiquidityTarget : sxDirection < 0 ? shortLiquidityTarget : na
-plot(sxDirection, "SX Direction 1L -1S", color=color.new(color.white, 100), display=display.data_window)
-plot(sxEntry, "SX Entry/Trigger", color=color.new(color.white, 100), display=display.data_window)
-plot(sxStop, "SX Stop Loss", color=color.new(color.red, 100), display=display.data_window)
-plot(sxTarget, "SX Take Profit", color=color.new(color.green, 100), display=display.data_window)
-plot(sxRiskPips, "SX Risk Pips", color=color.new(color.orange, 100), display=display.data_window)
-plot(sxScore, "SX Score", color=color.new(color.aqua, 100), display=display.data_window)
-plot(noTrade ? 1.0 : 0.0, "SX No Trade", color=color.new(color.gray, 100), display=display.data_window)
-plot(sxIfvg, "SX iFVG Retest", color=color.new(color.purple, 100), display=display.data_window)
-plot(sxHtfKeyNear, "SX HTF Key Near", color=color.new(color.blue, 100), display=display.data_window)
-plot(sxHtfKeyLevel, "SX HTF Key Level", color=color.new(color.blue, 100), display=display.data_window)
-plot(sxLiquidityTarget, "SX Liquidity Target", color=color.new(color.yellow, 100), display=display.data_window)
-plot(xauRecommendedLotProjected, "SX Max XAU Lot", color=color.new(color.orange, 100), display=display.data_window)
-
-stateBgColor = longEntrySignal ? color.new(color.green, 82) :
-     shortEntrySignal ? color.new(color.red, 82) :
-     validBuyZone or rangeBuySetup ? color.new(color.green, 92) :
-     validSellZone or rangeSellSetup ? color.new(color.red, 92) :
-     noTrade ? color.new(color.gray, 94) :
-     na
-bgcolor(showStateBackground ? stateBgColor : na, title="Sentinel X visual state")
-
 buyZonePulse = validBuyZone and not validBuyZone[1]
 sellZonePulse = validSellZone and not validSellZone[1]
 rangeBuyPulse = rangeBuySetup and not rangeBuySetup[1] and not validBuyZone
@@ -1288,6 +1268,36 @@ longPreparePulse = longPrepare and not longPrepare[1]
 shortPreparePulse = shortPrepare and not shortPrepare[1]
 ifvgLongPulse = ifvgLongModel and not ifvgLongModel[1]
 ifvgShortPulse = ifvgShortModel and not ifvgShortModel[1]
+
+var string lastEntryTimeStr = "N/A"
+var float sxEntryTimeHHMM = na
+
+if longPreparePulse or shortPreparePulse or longEntrySignal or shortEntrySignal or ifvgLongPulse or ifvgShortPulse or buyZonePulse or sellZonePulse
+    lastEntryTimeStr := str.format_time(time, "HH:mm", displayTz)
+    sxEntryTimeHHMM := hour(time, displayTz) * 100 + minute(time, displayTz)
+
+plot(sxDirection, "SX Direction 1L -1S", color=color.new(color.white, 100), display=display.data_window)
+plot(sxEntry, "SX Entry/Trigger", color=color.new(color.white, 100), display=display.data_window)
+plot(sxStop, "SX Stop Loss", color=color.new(color.red, 100), display=display.data_window)
+plot(sxTarget, "SX Take Profit", color=color.new(color.green, 100), display=display.data_window)
+plot(sxRiskPips, "SX Risk Pips", color=color.new(color.orange, 100), display=display.data_window)
+plot(sxScore, "SX Score", color=color.new(color.aqua, 100), display=display.data_window)
+plot(noTrade ? 1.0 : 0.0, "SX No Trade", color=color.new(color.gray, 100), display=display.data_window)
+plot(sxIfvg, "SX iFVG Retest", color=color.new(color.purple, 100), display=display.data_window)
+plot(sxHtfKeyNear, "SX HTF Key Near", color=color.new(color.blue, 100), display=display.data_window)
+plot(sxHtfKeyLevel, "SX HTF Key Level", color=color.new(color.blue, 100), display=display.data_window)
+plot(sxLiquidityTarget, "SX Liquidity Target", color=color.new(color.yellow, 100), display=display.data_window)
+plot(xauRecommendedLotProjected, "SX Max XAU Lot", color=color.new(color.orange, 100), display=display.data_window)
+plot(sxEntryTimeHHMM, "SX Entry Time (HHMM UTC-3)", color=color.new(color.cyan, 100), display=display.data_window)
+
+stateBgColor = longEntrySignal ? color.new(color.green, 82) :
+     shortEntrySignal ? color.new(color.red, 82) :
+     validBuyZone or rangeBuySetup ? color.new(color.green, 92) :
+     validSellZone or rangeSellSetup ? color.new(color.red, 92) :
+     noTrade ? color.new(color.gray, 94) :
+     na
+bgcolor(showStateBackground ? stateBgColor : na, title="Sentinel X visual state")
+
 
 if showEventChartLabels and strongBullImpulse
     label.new(bar_index, low, "IMP", xloc=xloc.bar_index, style=label.style_label_up, color=color.new(color.green, 45), textcolor=color.white, size=size.tiny)
@@ -1320,39 +1330,39 @@ if showCrtChartMarkers and crtBearConfirm
 if showSetupChartMarkers and lotRiskPulse
     label.new(bar_index, high, "LOT RISK", xloc=xloc.bar_index, style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.tiny)
 if showSetupChartMarkers and longPreparePulse
-    label.new(bar_index, low, "PREP LONG", xloc=xloc.bar_index, style=label.style_label_up, color=color.new(color.lime, 0), textcolor=color.black, size=size.tiny)
+    label.new(bar_index, low, "PREP LONG\n" + str.format_time(time, "HH:mm", displayTz), xloc=xloc.bar_index, style=label.style_label_up, color=color.new(color.lime, 0), textcolor=color.black, size=size.tiny)
 if showSetupChartMarkers and shortPreparePulse
-    label.new(bar_index, high, "PREP SHORT", xloc=xloc.bar_index, style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.tiny)
+    label.new(bar_index, high, "PREP SHORT\n" + str.format_time(time, "HH:mm", displayTz), xloc=xloc.bar_index, style=label.style_label_down, color=color.new(color.red, 0), textcolor=color.white, size=size.tiny)
 if showSetupChartMarkers and ifvgLongPulse
-    label.new(bar_index, low, "iFVG LONG", xloc=xloc.bar_index, style=label.style_label_up, color=color.new(color.purple, 0), textcolor=color.white, size=size.tiny)
+    label.new(bar_index, low, "iFVG LONG\n" + str.format_time(time, "HH:mm", displayTz), xloc=xloc.bar_index, style=label.style_label_up, color=color.new(color.purple, 0), textcolor=color.white, size=size.tiny)
 if showSetupChartMarkers and ifvgShortPulse
-    label.new(bar_index, high, "iFVG SHORT", xloc=xloc.bar_index, style=label.style_label_down, color=color.new(color.purple, 0), textcolor=color.white, size=size.tiny)
+    label.new(bar_index, high, "iFVG SHORT\n" + str.format_time(time, "HH:mm", displayTz), xloc=xloc.bar_index, style=label.style_label_down, color=color.new(color.purple, 0), textcolor=color.white, size=size.tiny)
 
 decision = longEntrySignal ? "LONG" : shortEntrySignal ? "SHORT" : longPrepare ? "PREP LONG" : shortPrepare ? "PREP SHORT" : noTrade ? "NO TRADE: " + noTradeReason : validBuyZone ? "BUY ZONE" : validSellZone ? "SELL ZONE" : rangeBuySetup ? "RANGE BUY" : rangeSellSetup ? "RANGE SELL" : "WAIT"
 var string lastDecision = ""
 
 if showDecisionLabels and barstate.isconfirmed and decision != lastDecision
     decisionColor = str.contains(decision, "LONG") or str.contains(decision, "BUY") ? color.new(color.green, 10) : str.contains(decision, "SHORT") or str.contains(decision, "SELL") ? color.new(color.red, 10) : color.new(color.gray, 35)
-    label.new(bar_index, close, decision, xloc=xloc.bar_index, style=label.style_label_left, color=decisionColor, textcolor=color.white, size=size.tiny)
+    label.new(bar_index, close, decision + " [" + str.format_time(time, "HH:mm", displayTz) + "]", xloc=xloc.bar_index, style=label.style_label_left, color=decisionColor, textcolor=color.white, size=size.tiny)
     lastDecision := decision
 
 if sendPreTradeAlerts and longPreparePulse
-    alert("SENTINEL X PREP LONG | trigger " + str.tostring(longPrepareEntry, format.mintick) + " | SL " + str.tostring(longPrepareSl, format.mintick) + " | TP " + str.tostring(longPrepareTp, format.mintick) + " | liquidity " + str.tostring(longLiquidityTarget, format.mintick) + " | risk " + str.tostring(longPreparePips, "#.#") + " pips", alert.freq_once_per_bar_close)
+    alert("SENTINEL X PREP LONG @ " + str.format_time(time, "HH:mm:ss", displayTz) + " (" + displayTz + ") | trigger " + str.tostring(longPrepareEntry, format.mintick) + " | SL " + str.tostring(longPrepareSl, format.mintick) + " | TP " + str.tostring(longPrepareTp, format.mintick) + " | liquidity " + str.tostring(longLiquidityTarget, format.mintick) + " | risk " + str.tostring(longPreparePips, "#.#") + " pips", alert.freq_once_per_bar_close)
 
 if sendPreTradeAlerts and shortPreparePulse
-    alert("SENTINEL X PREP SHORT | trigger " + str.tostring(shortPrepareEntry, format.mintick) + " | SL " + str.tostring(shortPrepareSl, format.mintick) + " | TP " + str.tostring(shortPrepareTp, format.mintick) + " | liquidity " + str.tostring(shortLiquidityTarget, format.mintick) + " | risk " + str.tostring(shortPreparePips, "#.#") + " pips", alert.freq_once_per_bar_close)
+    alert("SENTINEL X PREP SHORT @ " + str.format_time(time, "HH:mm:ss", displayTz) + " (" + displayTz + ") | trigger " + str.tostring(shortPrepareEntry, format.mintick) + " | SL " + str.tostring(shortPrepareSl, format.mintick) + " | TP " + str.tostring(shortPrepareTp, format.mintick) + " | liquidity " + str.tostring(shortLiquidityTarget, format.mintick) + " | risk " + str.tostring(shortPreparePips, "#.#") + " pips", alert.freq_once_per_bar_close)
 
 if ifvgLongPulse
-    alert("SENTINEL X iFVG LONG | MSS + inverted FVG retest | liquidity " + str.tostring(longLiquidityTarget, format.mintick), alert.freq_once_per_bar_close)
+    alert("SENTINEL X iFVG LONG @ " + str.format_time(time, "HH:mm:ss", displayTz) + " (" + displayTz + ") | MSS + inverted FVG retest | liquidity " + str.tostring(longLiquidityTarget, format.mintick), alert.freq_once_per_bar_close)
 
 if ifvgShortPulse
-    alert("SENTINEL X iFVG SHORT | MSS + inverted FVG retest | liquidity " + str.tostring(shortLiquidityTarget, format.mintick), alert.freq_once_per_bar_close)
+    alert("SENTINEL X iFVG SHORT @ " + str.format_time(time, "HH:mm:ss", displayTz) + " (" + displayTz + ") | MSS + inverted FVG retest | liquidity " + str.tostring(shortLiquidityTarget, format.mintick), alert.freq_once_per_bar_close)
 
 if longEntrySignal
-    alert("SENTINEL X LONG | entry " + str.tostring(close, format.mintick) + " | SL " + str.tostring(activeLongStop, format.mintick) + " | TP " + str.tostring(activeLongTp, format.mintick) + " | score " + str.tostring(math.round(longScore)), alert.freq_once_per_bar_close)
+    alert("SENTINEL X LONG @ " + str.format_time(time, "HH:mm:ss", displayTz) + " (" + displayTz + ") | entry " + str.tostring(close, format.mintick) + " | SL " + str.tostring(activeLongStop, format.mintick) + " | TP " + str.tostring(activeLongTp, format.mintick) + " | score " + str.tostring(math.round(longScore)), alert.freq_once_per_bar_close)
 
 if shortEntrySignal
-    alert("SENTINEL X SHORT | entry " + str.tostring(close, format.mintick) + " | SL " + str.tostring(activeShortStop, format.mintick) + " | TP " + str.tostring(activeShortTp, format.mintick) + " | score " + str.tostring(math.round(shortScore)), alert.freq_once_per_bar_close)
+    alert("SENTINEL X SHORT @ " + str.format_time(time, "HH:mm:ss", displayTz) + " (" + displayTz + ") | entry " + str.tostring(close, format.mintick) + " | SL " + str.tostring(activeShortStop, format.mintick) + " | TP " + str.tostring(activeShortTp, format.mintick) + " | score " + str.tostring(math.round(shortScore)), alert.freq_once_per_bar_close)
 
 if dailyStop and not dailyStop[1]
     alert("SENTINEL X DAILY LIMIT | " + dailyReason + " | trading blocked for today", alert.freq_once_per_bar_close)
@@ -1360,7 +1370,7 @@ if dailyStop and not dailyStop[1]
 if xauManualLotTooLarge and not xauManualLotTooLarge[1]
     alert("SENTINEL X XAU LOT RISK | monitored lot " + str.tostring(xauManualLotSize, "#.##") + " is above recommended max " + str.tostring(xauRecommendedLotProjected, "#.##"), alert.freq_once_per_bar_close)
 
-var table dash = table.new(f_dashboardPosition(dashboardPositionInput), 4, 11, border_width=1)
+var table dash = table.new(f_dashboardPosition(dashboardPositionInput), 4, 12, border_width=1)
 
 showDashboardTable = showDashboard and not cleanChartUi and not forceNoChartHud and dashboardMode != "Off"
 
@@ -1420,5 +1430,11 @@ if showDashboardTable and barstate.islast
     table.cell(dash, 2, 10, visualDensity, bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
     table.cell(dash, 3, 10, timeframe.period, bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
 
+    table.cell(dash, 0, 11, "Time", bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 1, 11, str.format_time(time, "HH:mm", displayTz) + " (" + displayTz + ")", bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 2, 11, "Entry Time", bgcolor=color.new(color.black, 10), text_color=color.white, text_size=size.tiny)
+    table.cell(dash, 3, 11, lastEntryTimeStr, bgcolor=color.new(color.black, 10), text_color=color.cyan, text_size=size.tiny)
+
 if not showDashboardTable and barstate.islast
-    table.clear(dash, 0, 0, 3, 10)
+    table.clear(dash, 0, 0, 3, 11)
+
