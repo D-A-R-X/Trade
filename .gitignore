@@ -9,3 +9,5 @@ __pycache__/
 browser_profile/
 calibration_dump.json
 session.json
+node_modules/
+.convex/

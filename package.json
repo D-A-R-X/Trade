@@ -1,0 +1,13 @@
+{
+  "name": "sentinel-x-trade-platform",
+  "version": "2.0.0",
+  "description": "Full-stack Trade Analysis & Signal Provider Web Application with Convex Real-Time App Sync",
+  "main": "run_server.py",
+  "scripts": {
+    "convex:dev": "convex dev",
+    "convex:deploy": "convex deploy"
+  },
+  "dependencies": {
+    "convex": "^1.11.0"
+  }
+}

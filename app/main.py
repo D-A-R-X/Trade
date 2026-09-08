@@ -9,6 +9,7 @@ from typing import Optional, Dict, Any, List
 from app.database import init_db, save_setting, get_setting, save_signal, get_signals, get_signal_stats
 from app.sentinel_engine import SentinelXEngine
 from app.market_data import MarketDataProvider
+from app.convex_bridge import ConvexBridge
 
 app = FastAPI(title="Sentinel X Trade Analysis & Signal Provider", version="2.0.0")
 
@@ -90,10 +91,13 @@ def analyze_market(req: AnalysisRequest):
     
     result = engine.analyze(df, symbol=req.symbol, timeframe=req.timeframe)
     
-    # If a valid setup signal is generated, save to database
+    # Sync analysis state to Convex
+    ConvexBridge.push_analysis(result)
+    
+    # If a valid setup signal is generated, save to database & sync to Convex
     if result.get("signal", {}).get("has_signal", False):
         sig = result["signal"]
-        save_signal({
+        signal_dict = {
             "symbol": req.symbol,
             "timeframe": req.timeframe,
             "direction": sig["direction"],
@@ -109,9 +113,12 @@ def analyze_market(req: AnalysisRequest):
             "status": "ACTIVE",
             "entry_time": result["timestamp"],
             "notes": f"Regime: {result['regime']} | ADX: {result['indicators']['adx']} | RSI: {result['indicators']['rsi']}"
-        })
+        }
+        save_signal(signal_dict)
+        ConvexBridge.push_signal(signal_dict)
         
     return result
+
 
 @app.get("/api/v1/signals")
 def list_signals(limit: int = 50):
