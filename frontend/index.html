@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SENTINEL X | Trade Analysis & Signal Provider</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        darkBg: '#131722',
+                        cardBg: '#1e222d',
+                        borderBg: '#2a2e39',
+                        accentGreen: '#089981',
+                        accentRed: '#f23645',
+                        accentBlue: '#2962ff',
+                        accentCyan: '#00bcd4'
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Lightweight Charts by TradingView -->
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { background-color: #131722; color: #d1d4dc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #1e222d; }
+        ::-webkit-scrollbar-thumb { background: #363c4e; border-radius: 3px; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- Header Navigation -->
+    <header class="bg-cardBg border-b border-borderBg px-4 py-3 flex flex-wrap items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+            <div class="w-9 h-9 rounded-lg bg-accentBlue flex items-center justify-center font-bold text-white shadow-lg">
+                <i class="fa-solid fa-chart-line"></i>
+            </div>
+            <div>
+                <h1 class="font-bold text-lg text-white leading-tight">SENTINEL X</h1>
+                <p class="text-xs text-gray-400">Trade Analysis & Real-Time Signal Provider</p>
+            </div>
+        </div>
+
+        <!-- Controls: Symbol, Timeframe, Timezone -->
+        <div class="flex items-center flex-wrap gap-2">
+            <!-- Symbol Selector -->
+            <select id="symbolSelect" class="bg-darkBg border border-borderBg text-white px-3 py-1.5 rounded text-sm focus:outline-none focus:border-accentBlue">
+                <option value="XAUUSD" selected>GOLD (XAUUSD)</option>
+                <option value="EURUSD">EUR / USD</option>
+                <option value="GBPUSD">GBP / USD</option>
+                <option value="BTCUSD">BITCOIN (BTCUSD)</option>
+                <option value="AAPL">APPLE (AAPL)</option>
+            </select>
+
+            <!-- Timeframe Selector -->
+            <div class="flex bg-darkBg rounded border border-borderBg p-0.5">
+                <button class="tf-btn px-2.5 py-1 text-xs rounded font-medium text-gray-400 hover:text-white" data-tf="1m">1m</button>
+                <button class="tf-btn active px-2.5 py-1 text-xs rounded font-medium bg-accentBlue text-white" data-tf="5m">5m</button>
+                <button class="tf-btn px-2.5 py-1 text-xs rounded font-medium text-gray-400 hover:text-white" data-tf="15m">15m</button>
+                <button class="tf-btn px-2.5 py-1 text-xs rounded font-medium text-gray-400 hover:text-white" data-tf="1h">1h</button>
+            </div>
+
+            <!-- Timezone Selector -->
+            <select id="timezoneSelect" class="bg-darkBg border border-borderBg text-white px-3 py-1.5 rounded text-xs focus:outline-none">
+                <option value="UTC-3">UTC-3 (S. America)</option>
+                <option value="UTC+0">UTC+0 (GMT)</option>
+                <option value="UTC+5:30" selected>UTC+5:30 (IST)</option>
+                <option value="America/New_York">UTC-5 (EST / NY)</option>
+            </select>
+
+            <!-- API Key Button -->
+            <button id="openApiKeyModal" class="bg-darkBg hover:bg-borderBg border border-borderBg text-xs font-semibold px-3 py-1.5 rounded flex items-center gap-1.5 transition">
+                <span id="apiKeyBadge" class="w-2 h-2 rounded-full bg-yellow-500"></span>
+                <span id="apiKeyStatusText">API Key: Offline</span>
+                <i class="fa-solid fa-key text-gray-400"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Workspace Dashboard -->
+    <main class="flex-1 p-4 grid grid-cols-1 lg:grid-cols-12 gap-4">
+        
+        <!-- Left: Interactive Candlestick Chart (8 cols) -->
+        <section class="lg:col-span-8 bg-cardBg border border-borderBg rounded-lg p-3 flex flex-col shadow-lg">
+            <div class="flex items-center justify-between pb-2 border-b border-borderBg mb-2">
+                <div class="flex items-center gap-3">
+                    <span id="chartSymbolTitle" class="text-white font-bold">XAUUSD</span>
+                    <span id="chartTfTitle" class="text-xs text-gray-400">5m</span>
+                    <span id="chartLivePrice" class="font-mono text-sm font-bold text-accentGreen">$2,650.00</span>
+                </div>
+                <div class="text-xs text-gray-400 flex items-center gap-2">
+                    <i class="fa-solid fa-circle text-[8px] text-accentGreen animate-pulse"></i> Live Data Engine
+                </div>
+            </div>
+            
+            <!-- Chart Container -->
+            <div id="chartContainer" class="w-full flex-1 min-h-[420px]"></div>
+        </section>
+
+        <!-- Right: Sentinel X Market Analysis HUD & Signal Box (4 cols) -->
+        <section class="lg:col-span-4 flex flex-col gap-4">
+            
+            <!-- Quality Score & Regime Card -->
+            <div class="bg-cardBg border border-borderBg rounded-lg p-4 shadow-lg">
+                <div class="flex items-center justify-between mb-3">
+                    <h2 class="font-bold text-white text-sm flex items-center gap-2">
+                        <i class="fa-solid fa-gauge-high text-accentBlue"></i> Sentinel X Analysis HUD
+                    </h2>
+                    <span id="qualityGrade" class="px-2 py-0.5 rounded text-xs font-bold bg-accentGreen text-white">GRADE A+</span>
+                </div>
+
+                <!-- Quality Score Gauge Meter -->
+                <div class="flex items-center justify-between bg-darkBg rounded-lg p-3 mb-3 border border-borderBg">
+                    <div>
+                        <div class="text-xs text-gray-400">Quality Score</div>
+                        <div id="qualityScore" class="text-3xl font-black text-white">85.0 <span class="text-xs text-gray-500 font-normal">/ 100</span></div>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-xs text-gray-400">Market Regime</div>
+                        <div id="marketRegime" class="text-sm font-bold text-accentGreen">TRENDING BULL</div>
+                    </div>
+                </div>
+
+                <!-- Score Breakdown Bars -->
+                <div class="space-y-2 mb-3">
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-gray-400">Bullish Power</span>
+                            <span id="longScoreText" class="text-accentGreen font-bold">85%</span>
+                        </div>
+                        <div class="w-full bg-darkBg h-1.5 rounded-full overflow-hidden">
+                            <div id="longScoreBar" class="bg-accentGreen h-full" style="width: 85%;"></div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-xs mb-1">
+                            <span class="text-gray-400">Bearish Power</span>
+                            <span id="shortScoreText" class="text-accentRed font-bold">15%</span>
+                        </div>
+                        <div class="w-full bg-darkBg h-1.5 rounded-full overflow-hidden">
+                            <div id="shortScoreBar" class="bg-accentRed h-full" style="width: 15%;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Indicators Grid -->
+                <div class="grid grid-cols-4 gap-2 text-center text-xs">
+                    <div class="bg-darkBg p-2 rounded border border-borderBg">
+                        <div class="text-gray-400">EMA 20/50</div>
+                        <div id="indEma" class="font-bold text-white mt-0.5">BULL</div>
+                    </div>
+                    <div class="bg-darkBg p-2 rounded border border-borderBg">
+                        <div class="text-gray-400">ADX</div>
+                        <div id="indAdx" class="font-bold text-white mt-0.5">24.5</div>
+                    </div>
+                    <div class="bg-darkBg p-2 rounded border border-borderBg">
+                        <div class="text-gray-400">RSI</div>
+                        <div id="indRsi" class="font-bold text-white mt-0.5">58.2</div>
+                    </div>
+                    <div class="bg-darkBg p-2 rounded border border-borderBg">
+                        <div class="text-gray-400">ATR</div>
+                        <div id="indAtr" class="font-bold text-white mt-0.5">4.20</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Signal Provider Card -->
+            <div class="bg-cardBg border border-borderBg rounded-lg p-4 shadow-lg flex-1 flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="font-bold text-white text-sm flex items-center gap-2">
+                            <i class="fa-solid fa-bullhorn text-accentCyan"></i> Live Signal Provider
+                        </h3>
+                        <span id="signalDecision" class="px-2.5 py-1 rounded text-xs font-bold bg-accentGreen text-white animate-bounce">BUY SIGNAL</span>
+                    </div>
+
+                    <!-- Signal Levels Box -->
+                    <div class="bg-darkBg border border-borderBg rounded-lg p-3 space-y-2 mb-3 font-mono text-xs">
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-400">Direction:</span>
+                            <span id="sigDirection" class="font-bold text-accentGreen">BUY / LONG</span>
+                        </div>
+                        <div class="flex justify-between items-center border-t border-borderBg pt-1.5">
+                            <span class="text-gray-400">Entry Price:</span>
+                            <span id="sigEntry" class="font-bold text-white">$2,650.00</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-400">Stop Loss (SL):</span>
+                            <span id="sigSl" class="font-bold text-accentRed">$2,643.70</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-400">Take Profit (TP):</span>
+                            <span id="sigTp" class="font-bold text-accentGreen">$2,662.60</span>
+                        </div>
+                        <div class="flex justify-between items-center border-t border-borderBg pt-1.5">
+                            <span class="text-gray-400">Risk/Reward:</span>
+                            <span id="sigRr" class="font-bold text-white">1 : 2.0</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-400">Rec. Position Size:</span>
+                            <span id="sigLot" class="font-bold text-accentCyan">0.16 Lots ($100 Risk)</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="grid grid-cols-2 gap-2">
+                    <button id="btnExportTelegram" class="bg-accentBlue hover:bg-blue-600 text-white font-bold py-2 rounded text-xs flex items-center justify-center gap-1.5 transition">
+                        <i class="fa-brands fa-telegram text-sm"></i> Telegram Broadcast
+                    </button>
+                    <button id="btnCopySignal" class="bg-darkBg hover:bg-borderBg border border-borderBg text-white font-bold py-2 rounded text-xs flex items-center justify-center gap-1.5 transition">
+                        <i class="fa-solid fa-copy"></i> Copy Signal
+                    </button>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Bottom Signal Tracker & Performance Stats -->
+    <footer class="p-4 pt-0">
+        <div class="bg-cardBg border border-borderBg rounded-lg p-4 shadow-lg">
+            <div class="flex flex-wrap items-center justify-between gap-4 mb-3 border-b border-borderBg pb-3">
+                <h3 class="font-bold text-white text-sm flex items-center gap-2">
+                    <i class="fa-solid fa-list-check text-accentBlue"></i> Signal Tracker & Win Rate Analytics
+                </h3>
+                <div class="flex items-center gap-4 text-xs">
+                    <div>Total Signals: <span id="statTotal" class="font-bold text-white">0</span></div>
+                    <div>Wins: <span id="statWins" class="font-bold text-accentGreen">0</span></div>
+                    <div>Losses: <span id="statLosses" class="font-bold text-accentRed">0</span></div>
+                    <div class="bg-darkBg px-3 py-1 rounded border border-borderBg font-bold text-accentGreen">
+                        Win Rate: <span id="statWinRate">0.0%</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Signal Table -->
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs">
+                    <thead class="bg-darkBg text-gray-400 font-semibold border-b border-borderBg">
+                        <tr>
+                            <th class="p-2.5">ID</th>
+                            <th class="p-2.5">Time</th>
+                            <th class="p-2.5">Asset</th>
+                            <th class="p-2.5">Direction</th>
+                            <th class="p-2.5">Entry Price</th>
+                            <th class="p-2.5">Stop Loss</th>
+                            <th class="p-2.5">Take Profit</th>
+                            <th class="p-2.5">Score</th>
+                            <th class="p-2.5">Lot Size</th>
+                            <th class="p-2.5">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="signalTableBody" class="divide-y divide-borderBg">
+                        <tr>
+                            <td colspan="10" class="p-4 text-center text-gray-500">No trade signals recorded yet. Active signals will appear here.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </footer>
+
+    <!-- API Key Configuration Modal -->
+    <div id="apiKeyModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+        <div class="bg-cardBg border border-borderBg rounded-xl max-w-md w-full p-6 shadow-2xl">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="font-bold text-white text-base flex items-center gap-2">
+                    <i class="fa-solid fa-key text-accentBlue"></i> Configure Market Data API Key
+                </h3>
+                <button id="closeApiKeyModal" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            
+            <p class="text-xs text-gray-400 mb-4 leading-relaxed">
+                Provide your TwelveData or AlphaVantage API key to activate live real-time intraday data feeds and signal generation.
+            </p>
+
+            <form id="apiKeyForm" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-300 mb-1">API Provider</label>
+                    <select id="modalProvider" class="w-full bg-darkBg border border-borderBg text-white px-3 py-2 rounded text-xs focus:outline-none focus:border-accentBlue">
+                        <option value="twelvedata" selected>TwelveData (Recommended - Free Key Available)</option>
+                        <option value="alphavantage">AlphaVantage</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-bold text-gray-300 mb-1">API Key</label>
+                    <input type="password" id="modalApiKey" placeholder="Enter your API Key..." required class="w-full bg-darkBg border border-borderBg text-white px-3 py-2 rounded text-xs focus:outline-none focus:border-accentBlue">
+                </div>
+
+                <div id="modalVerifyFeedback" class="text-xs hidden p-2 rounded"></div>
+
+                <div class="flex justify-end gap-2 pt-2">
+                    <button type="button" id="btnCancelApiKey" class="px-4 py-2 bg-darkBg hover:bg-borderBg text-gray-300 text-xs rounded font-semibold">Cancel</button>
+                    <button type="submit" id="btnSaveApiKey" class="px-4 py-2 bg-accentBlue hover:bg-blue-600 text-white text-xs rounded font-semibold flex items-center gap-1.5">
+                        <i class="fa-solid fa-check"></i> Verify & Save Key
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- JavaScript Application Logic -->
+    <script src="app.js"></script>
+</body>
+</html>

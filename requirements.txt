@@ -1,7 +1,9 @@
-Telethon==1.36.0
-python-dotenv==1.0.1
-pytest==8.3.3
-
-# Unofficial Quotex client for DEMO execution (install separately):
-#   pip install git+https://github.com/cleitonleonel/pyquotex.git
-# Not on PyPI; community-maintained and may break without notice.
+fastapi>=0.110.0
+uvicorn>=0.28.0
+requests>=2.31.0
+pydantic>=2.6.0
+numpy>=1.26.0
+pandas>=2.2.0
+python-dotenv>=1.0.1
+Telethon>=1.36.0
+pytest>=8.3.3
