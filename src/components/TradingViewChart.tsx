@@ -76,8 +76,45 @@ export const TradingViewChart: React.FC<TradingViewChartProps> = ({
   }, []);
 
   useEffect(() => {
-    if (seriesRef.current && candles && candles.length > 0) {
-      seriesRef.current.setData(candles);
+    if (!seriesRef.current || !candles || candles.length === 0) return;
+
+    try {
+      const formattedCandles: CandlestickData[] = [];
+      const seenTimes = new Set<number>();
+
+      for (const c of candles) {
+        let rawTime = (c as any).time ?? (c as any).timestamp;
+        let timeInSeconds: number | null = null;
+
+        if (typeof rawTime === 'number') {
+          timeInSeconds = rawTime > 1e10 ? Math.floor(rawTime / 1000) : Math.floor(rawTime);
+        } else if (typeof rawTime === 'string') {
+          const parsedDate = new Date(rawTime.includes(' ') ? rawTime.replace(' ', 'T') : rawTime);
+          if (!isNaN(parsedDate.getTime())) {
+            timeInSeconds = Math.floor(parsedDate.getTime() / 1000);
+          }
+        }
+
+        if (timeInSeconds !== null && !isNaN(timeInSeconds) && !seenTimes.has(timeInSeconds)) {
+          seenTimes.add(timeInSeconds);
+          formattedCandles.push({
+            time: timeInSeconds as any,
+            open: Number(c.open),
+            high: Number(c.high),
+            low: Number(c.low),
+            close: Number(c.close),
+          });
+        }
+      }
+
+      // Lightweight-charts requires strictly ascending time order
+      formattedCandles.sort((a, b) => (a.time as number) - (b.time as number));
+
+      if (formattedCandles.length > 0) {
+        seriesRef.current.setData(formattedCandles);
+      }
+    } catch (err) {
+      console.error('Error formatting candles for TradingView Chart:', err);
     }
   }, [candles]);
 

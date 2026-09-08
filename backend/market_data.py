@@ -63,6 +63,7 @@ class MarketDataProvider:
                     for item in reversed(data):
                         records.append({
                             "timestamp": item["datetime"],
+                            "time": int(pd.to_datetime(item["datetime"]).timestamp()),
                             "open": float(item["open"]),
                             "high": float(item["high"]),
                             "low": float(item["low"]),
