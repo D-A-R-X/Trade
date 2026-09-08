@@ -6,10 +6,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 
-from app.database import init_db, save_setting, get_setting, save_signal, get_signals, get_signal_stats
-from app.sentinel_engine import SentinelXEngine
-from app.market_data import MarketDataProvider
-from app.convex_bridge import ConvexBridge
+from backend.database import init_db, save_setting, get_setting, save_signal, get_signals, get_signal_stats
+from backend.sentinel_engine import SentinelXEngine
+from backend.market_data import MarketDataProvider
+from backend.convex_bridge import ConvexBridge
 
 app = FastAPI(title="Sentinel X Trade Analysis & Signal Provider", version="2.0.0")
 
