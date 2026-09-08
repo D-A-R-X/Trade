@@ -1,12 +1,18 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import dynamic from 'next/dynamic';
 import { Header } from '@/components/Header';
-import { TradingViewChart } from '@/components/TradingViewChart';
 import { AnalysisHud } from '@/components/AnalysisHud';
 import { SignalProviderCard } from '@/components/SignalProviderCard';
 import { SignalTrackerTable } from '@/components/SignalTrackerTable';
 import { ApiKeyModal } from '@/components/ApiKeyModal';
+
+// Dynamically import TradingViewChart with SSR disabled to prevent Canvas/DOM SSR errors
+const TradingViewChart = dynamic(
+  () => import('@/components/TradingViewChart').then((mod) => mod.TradingViewChart),
+  { ssr: false }
+);
 
 export default function DashboardPage() {
   const [symbol, setSymbol] = useState('XAUUSD');
