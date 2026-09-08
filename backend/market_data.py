@@ -8,7 +8,9 @@ class MarketDataProvider:
     """
     Market Data Fetcher supporting TwelveData API, AlphaVantage, and Fallback Generator.
     Validates API keys and formats price candles for Sentinel X Analysis & Charting.
+    Includes in-memory caching to respect API rate limits (e.g. TwelveData 8 calls/min limit).
     """
+    _cache: Dict[str, Any] = {}
     
     @staticmethod
     def validate_api_key(provider: str, api_key: str) -> Dict[str, Any]:
@@ -25,12 +27,16 @@ class MarketDataProvider:
                     return {"valid": True, "provider": "TwelveData", "message": "TwelveData API key verified successfully!"}
                 elif res.get("code") == 401 or "invalid" in str(res).lower():
                     return {"valid": False, "provider": "TwelveData", "message": "Invalid TwelveData API key."}
+                elif "credit" in str(res).lower() or "limit" in str(res).lower() or res.get("code") == 429:
+                    return {"valid": True, "provider": "TwelveData", "message": "TwelveData API key saved! (Rate limit active, caching enabled)"}
                 else:
                     # Fallback check via quote
                     q_url = f"https://api.twelvedata.com/quote?symbol=XAU/USD&apikey={api_key}"
                     q_res = requests.get(q_url, timeout=12).json()
                     if "symbol" in q_res or "name" in q_res:
                         return {"valid": True, "provider": "TwelveData", "message": "TwelveData API key verified successfully!"}
+                    elif "credit" in str(q_res).lower() or "limit" in str(q_res).lower() or q_res.get("code") == 429:
+                        return {"valid": True, "provider": "TwelveData", "message": "TwelveData API key saved! (Rate limit active, caching enabled)"}
                     msg = q_res.get("message", "Invalid API key")
                     return {"valid": False, "provider": "TwelveData", "message": f"TwelveData error: {msg}"}
             except requests.exceptions.Timeout:
@@ -44,8 +50,10 @@ class MarketDataProvider:
                 res = requests.get(url, timeout=12).json()
                 if "Time Series (5min)" in res or "Meta Data" in res:
                     return {"valid": True, "provider": "AlphaVantage", "message": "AlphaVantage API key verified successfully!"}
+                elif "note" in res or "frequency" in str(res).lower() or "limit" in str(res).lower():
+                    return {"valid": True, "provider": "AlphaVantage", "message": "AlphaVantage API key saved! (Rate limit active, caching enabled)"}
                 else:
-                    return {"valid": False, "provider": "AlphaVantage", "message": "AlphaVantage key invalid or rate limit reached."}
+                    return {"valid": False, "provider": "AlphaVantage", "message": "AlphaVantage key invalid."}
             except requests.exceptions.Timeout:
                 return {"valid": False, "message": "AlphaVantage request timed out. Please try again."}
             except Exception as e:
@@ -57,8 +65,17 @@ class MarketDataProvider:
     @staticmethod
     def fetch_candles(symbol: str = "XAUUSD", timeframe: str = "5m", limit: int = 100, api_key: Optional[str] = None) -> pd.DataFrame:
         """
-        Fetch intraday candle data. Uses TwelveData if API key provided, else generates standard high-fidelity market data.
+        Fetch intraday candle data with 20s rate-limit cache. Uses TwelveData if API key provided.
         """
+        cache_key = f"{symbol.upper()}_{timeframe}_{api_key or 'demo'}"
+        now_ts = datetime.now().timestamp()
+        
+        # Check 20-second cache to protect API quota
+        if cache_key in MarketDataProvider._cache:
+            cached_time, cached_df = MarketDataProvider._cache[cache_key]
+            if now_ts - cached_time < 20:
+                return cached_df
+
         if api_key and len(api_key) > 5:
             # Try TwelveData
             formatted_symbol = "XAU/USD" if "XAU" in symbol.upper() else symbol.upper()
@@ -81,12 +98,16 @@ class MarketDataProvider:
                             "close": float(item["close"]),
                             "volume": float(item.get("volume", 100))
                         })
-                    return pd.DataFrame(records)
+                    df_res = pd.DataFrame(records)
+                    MarketDataProvider._cache[cache_key] = (now_ts, df_res)
+                    return df_res
             except Exception:
                 pass # Fallback below
 
         # Fallback Generator for seamless demo & offline execution
-        return MarketDataProvider.generate_simulated_candles(symbol, timeframe, limit)
+        df_sim = MarketDataProvider.generate_simulated_candles(symbol, timeframe, limit)
+        MarketDataProvider._cache[cache_key] = (now_ts, df_sim)
+        return df_sim
 
     @staticmethod
     def generate_simulated_candles(symbol: str = "XAUUSD", timeframe: str = "5m", limit: int = 100) -> pd.DataFrame:
