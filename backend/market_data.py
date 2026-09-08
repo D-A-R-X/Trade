@@ -18,25 +18,36 @@ class MarketDataProvider:
         
         provider = provider.lower()
         if provider == "twelvedata":
-            url = f"https://api.twelvedata.com/time_series?symbol=XAU/USD&interval=5min&outputsize=5&apikey={api_key}"
+            url = f"https://api.twelvedata.com/api_usage?apikey={api_key}"
             try:
-                res = requests.get(url, timeout=5).json()
-                if res.get("status") == "ok" or "values" in res:
+                res = requests.get(url, timeout=12).json()
+                if "timestamp" in res or res.get("status") == "ok" or "current_usage" in res or "plan" in res:
                     return {"valid": True, "provider": "TwelveData", "message": "TwelveData API key verified successfully!"}
+                elif res.get("code") == 401 or "invalid" in str(res).lower():
+                    return {"valid": False, "provider": "TwelveData", "message": "Invalid TwelveData API key."}
                 else:
-                    msg = res.get("message", "Invalid API key")
+                    # Fallback check via quote
+                    q_url = f"https://api.twelvedata.com/quote?symbol=XAU/USD&apikey={api_key}"
+                    q_res = requests.get(q_url, timeout=12).json()
+                    if "symbol" in q_res or "name" in q_res:
+                        return {"valid": True, "provider": "TwelveData", "message": "TwelveData API key verified successfully!"}
+                    msg = q_res.get("message", "Invalid API key")
                     return {"valid": False, "provider": "TwelveData", "message": f"TwelveData error: {msg}"}
+            except requests.exceptions.Timeout:
+                return {"valid": False, "message": "TwelveData request timed out. Please check network connection and try again."}
             except Exception as e:
                 return {"valid": False, "message": f"Connection error: {str(e)}"}
                 
         elif provider == "alphavantage":
             url = f"https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=IBM&interval=5min&apikey={api_key}"
             try:
-                res = requests.get(url, timeout=5).json()
+                res = requests.get(url, timeout=12).json()
                 if "Time Series (5min)" in res or "Meta Data" in res:
                     return {"valid": True, "provider": "AlphaVantage", "message": "AlphaVantage API key verified successfully!"}
                 else:
                     return {"valid": False, "provider": "AlphaVantage", "message": "AlphaVantage key invalid or rate limit reached."}
+            except requests.exceptions.Timeout:
+                return {"valid": False, "message": "AlphaVantage request timed out. Please try again."}
             except Exception as e:
                 return {"valid": False, "message": f"Connection error: {str(e)}"}
         else:
@@ -56,7 +67,7 @@ class MarketDataProvider:
             
             url = f"https://api.twelvedata.com/time_series?symbol={formatted_symbol}&interval={interval}&outputsize={limit}&apikey={api_key}"
             try:
-                res = requests.get(url, timeout=6).json()
+                res = requests.get(url, timeout=12).json()
                 if "values" in res:
                     data = res["values"]
                     records = []

@@ -78,18 +78,28 @@ def get_candles(symbol: str = "XAUUSD", timeframe: str = "5m", limit: int = 100)
         "candles": df.to_dict(orient="records")
     }
 
+@app.get("/api/v1/analyze")
 @app.post("/api/v1/analyze")
-def analyze_market(req: AnalysisRequest):
+def analyze_market(
+    req: Optional[AnalysisRequest] = None,
+    symbol: str = "XAUUSD",
+    tf: str = "5m",
+    timeframe: str = "5m",
+    tz: str = "UTC-3",
+    account_balance: float = 10000.0,
+    risk_percent: float = 1.0
+):
     """Run Sentinel X Analysis Engine on live price data."""
+    sym = req.symbol if req else symbol
+    time_frame = req.timeframe if req else (tf or timeframe)
+    acc = req.account_balance if req else account_balance
+    risk = req.risk_percent if req else risk_percent
+
     api_key = get_setting("MARKET_DATA_API_KEY", "")
-    df = MarketDataProvider.fetch_candles(symbol=req.symbol, timeframe=req.timeframe, limit=100, api_key=api_key)
+    df = MarketDataProvider.fetch_candles(symbol=sym, timeframe=time_frame, limit=100, api_key=api_key)
     
-    engine = SentinelXEngine(
-        account_balance=req.account_balance,
-        risk_percent=req.risk_percent
-    )
-    
-    result = engine.analyze(df, symbol=req.symbol, timeframe=req.timeframe)
+    engine = SentinelXEngine(account_balance=acc, risk_percent=risk)
+    result = engine.analyze(df, symbol=sym, timeframe=time_frame)
     
     # Sync analysis state to Convex
     ConvexBridge.push_analysis(result)
@@ -98,8 +108,8 @@ def analyze_market(req: AnalysisRequest):
     if result.get("signal", {}).get("has_signal", False):
         sig = result["signal"]
         signal_dict = {
-            "symbol": req.symbol,
-            "timeframe": req.timeframe,
+            "symbol": sym,
+            "timeframe": time_frame,
             "direction": sig["direction"],
             "signal_type": sig["decision"],
             "entry_price": sig["entry_price"],
@@ -120,6 +130,7 @@ def analyze_market(req: AnalysisRequest):
     return result
 
 
+@app.get("/api/v1/stats")
 @app.get("/api/v1/signals")
 def list_signals(limit: int = 50):
     """Get list of past & active signals and win rate statistics."""
