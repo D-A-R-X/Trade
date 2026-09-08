@@ -11,3 +11,6 @@ calibration_dump.json
 session.json
 node_modules/
 .convex/
+.next/
+out/
+
